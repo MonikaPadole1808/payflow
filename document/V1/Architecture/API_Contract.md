@@ -309,17 +309,84 @@ Update Profile
 
 # 15. Wallet APIs
 
-GET /wallet
+All Wallet APIs require authentication.
+
+Authorization
+
+USER
+
+ADMIN
+
+---
+
+## Wallet Details
+
+GET
+
+/api/v1/wallet
 
 Wallet Details
 
-POST /wallet/deposit
+Response
 
-Deposit Money
+{
+"success": true,
+"message": "Wallet retrieved successfully",
+"data": {
+"id": "uuid",
+"userId": "uuid",
+"balance": 0.00,
+"currency": "INR",
+"status": "ACTIVE",
+"createdAt": "timestamp",
+"updatedAt": "timestamp"
+}
+}
 
-POST /wallet/withdraw
+---
+
+## Wallet Deposit
+
+POST
+
+/api/v1/wallet/deposit
+
+Deposit funds into the authenticated user's wallet.
+
+Request
+
+{
+"amount": 100.00
+}
+
+Validation
+
+- amount is required
+- amount must be greater than 0
+- amount must have up to 17 integer digits and 2 decimal places
+
+---
+
+## Wallet Withdraw
+
+POST
+
+/api/v1/wallet/withdraw
 
 Withdraw Money
+
+Request
+
+{
+"amount": 100.00
+}
+
+Validation
+
+- amount is required
+- amount must be greater than 0
+- amount must have up to 17 integer digits and 2 decimal places
+- wallet balance must be sufficient
 
 ---
 

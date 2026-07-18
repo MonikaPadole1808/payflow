@@ -15,6 +15,7 @@ import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.InvalidRefreshTokenException;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.service.UserAccountService;
+import com.monika.payflow.wallet.service.WalletProvisioningService;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -37,6 +38,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
+    private final WalletProvisioningService walletProvisioningService;
 
     public AuthService(
             UserAccountService userAccountService,
@@ -44,7 +46,8 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             AuthenticationManager authenticationManager,
             JwtService jwtService,
-            JwtProperties jwtProperties
+            JwtProperties jwtProperties,
+            WalletProvisioningService walletProvisioningService
     ) {
         this.userAccountService = userAccountService;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -52,6 +55,7 @@ public class AuthService {
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
+        this.walletProvisioningService = walletProvisioningService;
     }
 
     @Transactional
@@ -65,6 +69,7 @@ public class AuthService {
                 normalizedEmail,
                 passwordEncoder.encode(request.password())
         );
+        walletProvisioningService.createWalletForUser(savedUser);
         return createAuthResponse(savedUser);
     }
 

@@ -468,7 +468,49 @@ Design principles defined above remain unchanged.
 
 ---
 
-# 20. Approval
+# 20. Implemented Table Details
+
+## wallets
+
+Owner Module
+
+wallet
+
+Purpose
+
+Stores the current wallet balance for each authenticated user.
+
+Relationship
+
+One user owns exactly one wallet.
+
+Columns
+
+| Column | Type | Rule |
+|--------|------|------|
+| id | UUID | Primary key |
+| user_id | UUID | Required, unique, references users(id) |
+| balance | NUMERIC(19,2) | Required, default 0.00, cannot be negative |
+| currency | VARCHAR(3) | Required, default INR |
+| status | VARCHAR(30) | Required, ACTIVE or BLOCKED |
+| created_at | TIMESTAMPTZ | Required |
+| updated_at | TIMESTAMPTZ | Required |
+
+Constraints
+
+- `uk_wallets_user_id`
+- `fk_wallets_user`
+- `ck_wallets_balance_non_negative`
+- `ck_wallets_currency_length`
+- `ck_wallets_status`
+
+Migration
+
+- `V4__create_wallets_table.sql`
+
+---
+
+# 21. Approval
 
 Status
 

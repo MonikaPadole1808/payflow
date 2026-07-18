@@ -15,6 +15,7 @@ import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.entity.UserRole;
 import com.monika.payflow.user.entity.UserStatus;
 import com.monika.payflow.user.service.UserAccountService;
+import com.monika.payflow.wallet.service.WalletProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -54,6 +55,9 @@ class AuthServiceTest {
     @Mock
     private JwtProperties jwtProperties;
 
+    @Mock
+    private WalletProvisioningService walletProvisioningService;
+
     @InjectMocks
     private AuthService authService;
 
@@ -73,6 +77,7 @@ class AuthServiceTest {
         AuthResponse response = authService.register(request);
 
         verify(userAccountService).createActiveUser("monika@example.com", "encoded");
+        verify(walletProvisioningService).createWalletForUser(savedUser);
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isNotBlank();
         assertThat(response.tokenType()).isEqualTo("Bearer");
