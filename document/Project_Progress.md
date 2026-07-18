@@ -73,3 +73,119 @@ None
 # Current Branch
 
 dev
+
+
+---
+
+# Latest Development Status
+
+**Date:** 18-Jul-2026
+
+## Completed
+
+### Milestone 01
+
+✔ Project Foundation
+
+### Milestone 02
+
+✔ Authentication Foundation
+
+Implemented:
+
+- Spring Security
+- JWT
+- User Registration
+- Login
+- Refresh Token
+- Flyway
+- Authentication Tests
+
+---
+
+### Milestone 03
+
+✔ Wallet Module
+
+Implemented:
+
+- Wallet Entity
+- Wallet Repository
+- Wallet Service
+- Wallet Controller
+- Wallet DTOs
+- Wallet Provisioning
+- Deposit
+- Withdraw
+- Balance Inquiry
+- Flyway Migration V4
+- Wallet Tests
+
+Architecture Review
+
+Status: Approved
+
+Code Review
+
+Status: Approved
+
+---
+
+## Current Database
+
+Tables
+
+- users
+- refresh_tokens
+- wallets
+
+---
+
+## Current API Modules
+
+Authentication
+
+✔ Completed
+
+Wallet
+
+✔ Completed
+
+Transaction
+
+Pending
+
+Payment
+
+Pending
+
+Notification
+
+Pending
+
+Admin
+
+Pending
+
+---
+
+## Next Milestone
+
+Milestone 04
+
+Transaction (Ledger)
+
+Objectives
+
+- Transaction Entity
+- Transaction Repository
+- Transaction Service
+- Transaction APIs
+- Deposit Transaction Recording
+- Withdraw Transaction Recording
+- Transaction History
+- Flyway Migration
+
+Status
+
+Ready to Begin
