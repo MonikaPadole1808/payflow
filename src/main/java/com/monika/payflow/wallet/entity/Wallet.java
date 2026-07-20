@@ -99,4 +99,8 @@ public class Wallet {
     public void updateBalance(BigDecimal balance) {
         this.balance = balance;
     }
+
+    public void updateStatus(WalletStatus status) {
+        this.status = status;
+    }
 }

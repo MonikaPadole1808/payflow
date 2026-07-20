@@ -161,6 +161,36 @@ class WalletServiceTest {
     }
 
     @Test
+    void depositRejectsBlockedWalletBeforeBalanceMutation() {
+        UUID userId = UUID.randomUUID();
+        Wallet wallet = wallet(userId, "20.00");
+        wallet.updateStatus(WalletStatus.BLOCKED);
+        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
+
+        assertThatThrownBy(() -> walletService.deposit(userId, new BigDecimal("10.00")))
+                .isInstanceOf(BadRequestException.class);
+
+        assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
+    }
+
+    @Test
+    void withdrawRejectsBlockedWalletBeforeBalanceMutation() {
+        UUID userId = UUID.randomUUID();
+        Wallet wallet = wallet(userId, "20.00");
+        wallet.updateStatus(WalletStatus.BLOCKED);
+        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
+
+        assertThatThrownBy(() -> walletService.withdraw(userId, new BigDecimal("10.00")))
+                .isInstanceOf(BadRequestException.class);
+
+        assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
+    }
+
+    @Test
     void transferBetweenUsersDebitsSenderAndCreditsReceiverWithoutRecordingWalletLedgerEntries() {
         UUID senderUserId = UUID.randomUUID();
         UUID receiverUserId = UUID.randomUUID();
@@ -207,6 +237,50 @@ class WalletServiceTest {
     }
 
     @Test
+    void transferBetweenUsersRejectsBlockedSenderBeforeBalanceMutation() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        Wallet senderWallet = wallet(senderUserId, "100.00");
+        senderWallet.updateStatus(WalletStatus.BLOCKED);
+        Wallet receiverWallet = wallet(receiverUserId, "20.00");
+        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
+                .thenReturn(List.of(senderWallet, receiverWallet));
+
+        assertThatThrownBy(() -> walletService.transferBetweenUsers(
+                senderUserId,
+                receiverUserId,
+                new BigDecimal("30.00")
+        )).isInstanceOf(BadRequestException.class);
+
+        assertThat(senderWallet.balance()).isEqualByComparingTo("100.00");
+        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
+    }
+
+    @Test
+    void transferBetweenUsersRejectsBlockedReceiverBeforeBalanceMutation() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        Wallet senderWallet = wallet(senderUserId, "100.00");
+        Wallet receiverWallet = wallet(receiverUserId, "20.00");
+        receiverWallet.updateStatus(WalletStatus.BLOCKED);
+        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
+                .thenReturn(List.of(senderWallet, receiverWallet));
+
+        assertThatThrownBy(() -> walletService.transferBetweenUsers(
+                senderUserId,
+                receiverUserId,
+                new BigDecimal("30.00")
+        )).isInstanceOf(BadRequestException.class);
+
+        assertThat(senderWallet.balance()).isEqualByComparingTo("100.00");
+        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
+    }
+
+    @Test
     void transferBetweenUsersRejectsMissingReceiverWallet() {
         UUID senderUserId = UUID.randomUUID();
         UUID receiverUserId = UUID.randomUUID();
@@ -219,6 +293,30 @@ class WalletServiceTest {
                 receiverUserId,
                 new BigDecimal("30.00")
         )).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void unblockWalletRestoresDepositOperations() {
+        UUID userId = UUID.randomUUID();
+        UUID walletId = UUID.randomUUID();
+        Wallet wallet = wallet(userId, "20.00");
+        ReflectionTestUtils.setField(wallet, "id", walletId);
+        wallet.updateStatus(WalletStatus.BLOCKED);
+        when(walletRepository.findById(walletId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
+
+        WalletResponse unblockedWallet = walletService.unblockWallet(walletId);
+        WalletResponse depositResponse = walletService.deposit(userId, new BigDecimal("10.00"));
+
+        assertThat(unblockedWallet.status()).isEqualTo(WalletStatus.ACTIVE);
+        assertThat(depositResponse.balance()).isEqualByComparingTo("30.00");
+        verify(transactionRecorder).recordDeposit(
+                wallet,
+                new BigDecimal("10.00"),
+                new BigDecimal("20.00"),
+                new BigDecimal("30.00")
+        );
+        verify(notificationRecorder).recordDeposit(userId, new BigDecimal("10.00"));
     }
 
     private Wallet wallet(UUID userId, String balance) {

@@ -681,6 +681,32 @@ Rules
 
 ---
 
+## admin
+
+Owner Module
+
+admin
+
+Purpose
+
+Provides administrative visibility and orchestration across existing modules.
+
+Database Impact
+
+No admin-owned database tables are created in Version 1.
+
+Rules
+
+- Admin module owns no business data.
+- Admin module must not access repositories owned by other modules directly.
+- Admin reads and modifies data only through owning module services.
+
+Migration
+
+None.
+
+---
+
 # 21. Approval
 
 Status

@@ -3,6 +3,7 @@ package com.monika.payflow.common.config;
 import com.monika.payflow.auth.security.JwtAuthenticationEntryPoint;
 import com.monika.payflow.auth.security.JwtAuthenticationFilter;
 import com.monika.payflow.auth.security.JwtProperties;
+import com.monika.payflow.common.constants.AppConstants;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -64,6 +65,7 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
+                        .requestMatchers(AppConstants.API_BASE_PATH + "/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider)

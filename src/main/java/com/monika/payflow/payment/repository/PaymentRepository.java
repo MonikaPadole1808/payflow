@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
 
@@ -28,4 +29,6 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
               )
             """)
     Optional<Payment> findUserPaymentById(@Param("paymentId") UUID paymentId, @Param("userId") UUID userId);
+
+    long countByCreatedAtGreaterThanEqual(Instant createdAt);
 }

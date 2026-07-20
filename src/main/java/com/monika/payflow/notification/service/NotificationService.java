@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -96,6 +97,31 @@ public class NotificationService implements NotificationRecorder {
         return toResponse(notification);
     }
 
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> getNotificationsForAdmin(String search) {
+        return notificationRepository.findAll()
+                .stream()
+                .filter(notification -> matchesSearch(notification, search))
+                .sorted(Comparator.comparing(Notification::createdAt).reversed())
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public NotificationResponse getNotificationForAdmin(UUID notificationId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorCode.NOTIFICATION_NOT_FOUND.defaultMessage(),
+                        ErrorCode.NOTIFICATION_NOT_FOUND
+                ));
+        return toResponse(notification);
+    }
+
+    @Transactional(readOnly = true)
+    public long countNotifications() {
+        return notificationRepository.count();
+    }
+
     private void createUnread(UUID userId, NotificationType notificationType, String title, String message) {
         Notification notification = new Notification(
                 userId,
@@ -123,6 +149,21 @@ public class NotificationService implements NotificationRecorder {
 
     private String formatAmount(BigDecimal amount) {
         return amount.setScale(2).toPlainString();
+    }
+
+    private boolean matchesSearch(Notification notification, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+
+        String normalizedSearch = search.trim().toLowerCase();
+        return notification.id().toString().contains(normalizedSearch)
+                || notification.userId().toString().contains(normalizedSearch)
+                || notification.notificationType().name().toLowerCase().contains(normalizedSearch)
+                || notification.status().name().toLowerCase().contains(normalizedSearch)
+                || notification.title().toLowerCase().contains(normalizedSearch)
+                || notification.message().toLowerCase().contains(normalizedSearch)
+                || notification.referenceNumber().toLowerCase().contains(normalizedSearch);
     }
 
     private NotificationResponse toResponse(Notification notification) {

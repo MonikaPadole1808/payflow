@@ -60,9 +60,24 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
         return toResponse(wallet);
     }
 
+    @Transactional(readOnly = true)
+    public List<WalletResponse> getWalletsForAdmin(String search) {
+        return walletRepository.findAll()
+                .stream()
+                .filter(wallet -> matchesSearch(wallet, search))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public WalletResponse getWalletForAdmin(UUID walletId) {
+        return toResponse(findWalletById(walletId));
+    }
+
     @Transactional
     public WalletResponse deposit(UUID userId, BigDecimal amount) {
         Wallet wallet = findWalletForUpdate(userId);
+        validateWalletIsActive(wallet);
         BigDecimal normalizedAmount = normalizeAmount(amount);
         BigDecimal balanceBefore = wallet.balance();
         BigDecimal balanceAfter = balanceBefore.add(normalizedAmount);
@@ -77,6 +92,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
     @Transactional
     public WalletResponse withdraw(UUID userId, BigDecimal amount) {
         Wallet wallet = findWalletForUpdate(userId);
+        validateWalletIsActive(wallet);
         BigDecimal normalizedAmount = normalizeAmount(amount);
         BigDecimal balanceBefore = wallet.balance();
 
@@ -102,11 +118,37 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
         Map<UUID, Wallet> walletsByUserId = findWalletsForUpdate(senderUserId, receiverUserId);
         Wallet senderWallet = walletsByUserId.get(senderUserId);
         Wallet receiverWallet = walletsByUserId.get(receiverUserId);
+        validateWalletIsActive(senderWallet);
+        validateWalletIsActive(receiverWallet);
 
         WalletBalanceChange senderChange = debit(senderWallet, normalizedAmount);
         WalletBalanceChange receiverChange = credit(receiverWallet, normalizedAmount);
 
         return new WalletTransferResult(senderChange, receiverChange);
+    }
+
+    @Transactional
+    public WalletResponse blockWallet(UUID walletId) {
+        Wallet wallet = findWalletById(walletId);
+        wallet.updateStatus(WalletStatus.BLOCKED);
+        return toResponse(wallet);
+    }
+
+    @Transactional
+    public WalletResponse unblockWallet(UUID walletId) {
+        Wallet wallet = findWalletById(walletId);
+        wallet.updateStatus(WalletStatus.ACTIVE);
+        return toResponse(wallet);
+    }
+
+    @Transactional(readOnly = true)
+    public long countWallets() {
+        return walletRepository.count();
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal getTotalWalletBalance() {
+        return walletRepository.sumWalletBalances().setScale(2);
     }
 
     private Wallet findWallet(UUID userId) {
@@ -119,6 +161,14 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
 
     private Wallet findWalletForUpdate(UUID userId) {
         return walletRepository.findByUserIdForUpdate(userId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
+                        ErrorCode.WALLET_NOT_FOUND
+                ));
+    }
+
+    private Wallet findWalletById(UUID walletId) {
+        return walletRepository.findById(walletId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
                         ErrorCode.WALLET_NOT_FOUND
@@ -141,6 +191,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
     }
 
     private WalletBalanceChange debit(Wallet wallet, BigDecimal amount) {
+        validateWalletIsActive(wallet);
         BigDecimal balanceBefore = wallet.balance();
 
         if (balanceBefore.compareTo(amount) < 0) {
@@ -156,6 +207,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
     }
 
     private WalletBalanceChange credit(Wallet wallet, BigDecimal amount) {
+        validateWalletIsActive(wallet);
         BigDecimal balanceBefore = wallet.balance();
         BigDecimal balanceAfter = balanceBefore.add(amount);
         wallet.updateBalance(balanceAfter);
@@ -168,6 +220,27 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
         }
 
         return amount.setScale(2);
+    }
+
+    private void validateWalletIsActive(Wallet wallet) {
+        if (wallet.status() == WalletStatus.BLOCKED) {
+            throw new BadRequestException(
+                    ErrorCode.WALLET_BLOCKED.defaultMessage(),
+                    ErrorCode.WALLET_BLOCKED
+            );
+        }
+    }
+
+    private boolean matchesSearch(Wallet wallet, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+
+        String normalizedSearch = search.trim().toLowerCase();
+        return wallet.id().toString().contains(normalizedSearch)
+                || wallet.userId().toString().contains(normalizedSearch)
+                || wallet.currency().toLowerCase().contains(normalizedSearch)
+                || wallet.status().name().toLowerCase().contains(normalizedSearch);
     }
 
     private WalletResponse toResponse(Wallet wallet) {

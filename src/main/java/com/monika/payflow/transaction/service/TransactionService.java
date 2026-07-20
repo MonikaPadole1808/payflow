@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -70,6 +72,36 @@ public class TransactionService implements TransactionRecorder {
         return toResponse(transaction);
     }
 
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> getTransactionsForAdmin(String search) {
+        return transactionRepository.findAll()
+                .stream()
+                .filter(transaction -> matchesSearch(transaction, search))
+                .sorted(Comparator.comparing(Transaction::createdAt).reversed())
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionResponse getTransactionForAdmin(UUID transactionId) {
+        Transaction transaction = transactionRepository.findById(transactionId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorCode.TRANSACTION_NOT_FOUND.defaultMessage(),
+                        ErrorCode.TRANSACTION_NOT_FOUND
+                ));
+        return toResponse(transaction);
+    }
+
+    @Transactional(readOnly = true)
+    public long countTransactions() {
+        return transactionRepository.count();
+    }
+
+    @Transactional(readOnly = true)
+    public long countTransactionsCreatedSince(Instant createdAt) {
+        return transactionRepository.countByCreatedAtGreaterThanEqual(createdAt);
+    }
+
     private void record(
             Wallet wallet,
             TransactionType transactionType,
@@ -104,6 +136,20 @@ public class TransactionService implements TransactionRecorder {
 
     private String generateReferenceNumber() {
         return REFERENCE_PREFIX + UUID.randomUUID();
+    }
+
+    private boolean matchesSearch(Transaction transaction, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+
+        String normalizedSearch = search.trim().toLowerCase();
+        return transaction.id().toString().contains(normalizedSearch)
+                || transaction.walletId().toString().contains(normalizedSearch)
+                || transaction.transactionType().name().toLowerCase().contains(normalizedSearch)
+                || transaction.status().name().toLowerCase().contains(normalizedSearch)
+                || transaction.referenceNumber().toLowerCase().contains(normalizedSearch)
+                || transaction.description().toLowerCase().contains(normalizedSearch);
     }
 
     private TransactionResponse toResponse(Transaction transaction) {

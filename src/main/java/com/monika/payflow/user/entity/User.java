@@ -82,4 +82,16 @@ public class User {
     public UserStatus status() {
         return status;
     }
+
+    public void updateEmail(String email) {
+        this.email = email;
+    }
+
+    public void updateStatus(UserStatus status) {
+        this.status = status;
+    }
+
+    public void updateRole(UserRole role) {
+        this.role = role;
+    }
 }

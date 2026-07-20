@@ -15,10 +15,12 @@ public enum ErrorCode {
     WALLET_NOT_FOUND("PF-404-002", "Wallet was not found", HttpStatus.NOT_FOUND),
     WALLET_ALREADY_EXISTS("PF-409-002", "Wallet already exists for this user", HttpStatus.CONFLICT),
     INSUFFICIENT_WALLET_BALANCE("PF-400-004", "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
+    WALLET_BLOCKED("PF-400-007", "Wallet is blocked", HttpStatus.BAD_REQUEST),
     TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
     PAYMENT_NOT_FOUND("PF-404-004", "Payment was not found", HttpStatus.NOT_FOUND),
     PAYMENT_SELF_TRANSFER_NOT_ALLOWED("PF-400-005", "Users cannot transfer money to themselves", HttpStatus.BAD_REQUEST),
     NOTIFICATION_NOT_FOUND("PF-404-005", "Notification was not found", HttpStatus.NOT_FOUND),
+    ADMIN_SELF_ROLE_CHANGE_NOT_ALLOWED("PF-400-006", "Administrators cannot modify their own role", HttpStatus.BAD_REQUEST),
     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String code;

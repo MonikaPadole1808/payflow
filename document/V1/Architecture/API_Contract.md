@@ -364,6 +364,7 @@ Validation
 - amount is required
 - amount must be greater than 0
 - amount must have up to 17 integer digits and 2 decimal places
+- wallet status must be ACTIVE
 
 ---
 
@@ -387,6 +388,7 @@ Validation
 - amount must be greater than 0
 - amount must have up to 17 integer digits and 2 decimal places
 - wallet balance must be sufficient
+- wallet status must be ACTIVE
 
 ---
 
@@ -431,6 +433,8 @@ Validation
 - description must not exceed 255 characters
 - sender and receiver must be different users
 - sender wallet balance must be sufficient
+- sender wallet status must be ACTIVE
+- receiver wallet status must be ACTIVE
 
 Response
 
@@ -748,7 +752,168 @@ Rules
 
 # 19. Admin APIs
 
-Reserved for future implementation.
+All Admin APIs require authentication.
+
+Authorization
+
+ADMIN
+
+Users without ADMIN role receive 403 Forbidden.
+
+---
+
+## Admin Dashboard
+
+GET
+
+/api/v1/admin/dashboard
+
+Purpose
+
+Return platform-level operational statistics.
+
+Response
+
+{
+"success": true,
+"message": "Admin dashboard retrieved successfully",
+"data": {
+"totalUsers": 0,
+"activeUsers": 0,
+"blockedUsers": 0,
+"totalWallets": 0,
+"totalPayments": 0,
+"totalTransactions": 0,
+"totalNotifications": 0,
+"totalWalletBalance": 0.00,
+"todaysPayments": 0,
+"todaysTransactions": 0
+}
+}
+
+---
+
+## User Administration
+
+GET /api/v1/admin/users
+
+GET /api/v1/admin/users/{id}
+
+PUT /api/v1/admin/users/{id}
+
+PATCH /api/v1/admin/users/{id}/activate
+
+PATCH /api/v1/admin/users/{id}/deactivate
+
+PATCH /api/v1/admin/users/{id}/block
+
+PATCH /api/v1/admin/users/{id}/unblock
+
+Search
+
+- `search` query parameter is supported on the collection endpoint.
+
+Update Request
+
+{
+"email": "user@example.com",
+"status": "ACTIVE"
+}
+
+Rules
+
+- No delete operation exists.
+- `block` and `deactivate` set user status to DISABLED.
+- `unblock` and `activate` set user status to ACTIVE.
+
+---
+
+## Role Management
+
+GET /api/v1/admin/users/{id}/roles
+
+PATCH /api/v1/admin/users/{id}/roles
+
+Request
+
+{
+"role": "ADMIN"
+}
+
+Rules
+
+- Supported roles are USER and ADMIN.
+- Administrators cannot modify their own role.
+- No permission management or external RBAC framework is implemented.
+
+---
+
+## Wallet Administration
+
+GET /api/v1/admin/wallets
+
+GET /api/v1/admin/wallets/{id}
+
+PATCH /api/v1/admin/wallets/{id}/block
+
+PATCH /api/v1/admin/wallets/{id}/unblock
+
+Search
+
+- `search` query parameter is supported on the collection endpoint.
+
+Rules
+
+- Admin APIs do not allow wallet balance adjustment.
+
+---
+
+## Payment Administration
+
+GET /api/v1/admin/payments
+
+GET /api/v1/admin/payments/{id}
+
+Search
+
+- `search` query parameter is supported on the collection endpoint.
+
+Rules
+
+- Payments remain immutable.
+- No delete, update, reversal, or refund endpoint exists.
+
+---
+
+## Transaction Administration
+
+GET /api/v1/admin/transactions
+
+GET /api/v1/admin/transactions/{id}
+
+Search
+
+- `search` query parameter is supported on the collection endpoint.
+
+Rules
+
+- Transactions remain immutable.
+
+---
+
+## Notification Administration
+
+GET /api/v1/admin/notifications
+
+GET /api/v1/admin/notifications/{id}
+
+Search
+
+- `search` query parameter is supported on the collection endpoint.
+
+Rules
+
+- Admin notification endpoints are read-only.
 
 ---
 

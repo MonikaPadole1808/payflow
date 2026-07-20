@@ -1,0 +1,1674 @@
+﻿diff --git a/document/V1/Architecture/API_Contract.md b/document/V1/Architecture/API_Contract.md
+index bcaf1ce..658f3a9 100644
+--- a/document/V1/Architecture/API_Contract.md
++++ b/document/V1/Architecture/API_Contract.md
+@@ -364,6 +364,7 @@ Validation
+ - amount is required
+ - amount must be greater than 0
+ - amount must have up to 17 integer digits and 2 decimal places
++- wallet status must be ACTIVE
+ 
+ ---
+ 
+@@ -387,6 +388,7 @@ Validation
+ - amount must be greater than 0
+ - amount must have up to 17 integer digits and 2 decimal places
+ - wallet balance must be sufficient
++- wallet status must be ACTIVE
+ 
+ ---
+ 
+@@ -431,6 +433,8 @@ Validation
+ - description must not exceed 255 characters
+ - sender and receiver must be different users
+ - sender wallet balance must be sufficient
++- sender wallet status must be ACTIVE
++- receiver wallet status must be ACTIVE
+ 
+ Response
+ 
+@@ -748,7 +752,168 @@ Rules
+ 
+ # 19. Admin APIs
+ 
+-Reserved for future implementation.
++All Admin APIs require authentication.
++
++Authorization
++
++ADMIN
++
++Users without ADMIN role receive 403 Forbidden.
++
++---
++
++## Admin Dashboard
++
++GET
++
++/api/v1/admin/dashboard
++
++Purpose
++
++Return platform-level operational statistics.
++
++Response
++
++{
++"success": true,
++"message": "Admin dashboard retrieved successfully",
++"data": {
++"totalUsers": 0,
++"activeUsers": 0,
++"blockedUsers": 0,
++"totalWallets": 0,
++"totalPayments": 0,
++"totalTransactions": 0,
++"totalNotifications": 0,
++"totalWalletBalance": 0.00,
++"todaysPayments": 0,
++"todaysTransactions": 0
++}
++}
++
++---
++
++## User Administration
++
++GET /api/v1/admin/users
++
++GET /api/v1/admin/users/{id}
++
++PUT /api/v1/admin/users/{id}
++
++PATCH /api/v1/admin/users/{id}/activate
++
++PATCH /api/v1/admin/users/{id}/deactivate
++
++PATCH /api/v1/admin/users/{id}/block
++
++PATCH /api/v1/admin/users/{id}/unblock
++
++Search
++
++- `search` query parameter is supported on the collection endpoint.
++
++Update Request
++
++{
++"email": "user@example.com",
++"status": "ACTIVE"
++}
++
++Rules
++
++- No delete operation exists.
++- `block` and `deactivate` set user status to DISABLED.
++- `unblock` and `activate` set user status to ACTIVE.
++
++---
++
++## Role Management
++
++GET /api/v1/admin/users/{id}/roles
++
++PATCH /api/v1/admin/users/{id}/roles
++
++Request
++
++{
++"role": "ADMIN"
++}
++
++Rules
++
++- Supported roles are USER and ADMIN.
++- Administrators cannot modify their own role.
++- No permission management or external RBAC framework is implemented.
++
++---
++
++## Wallet Administration
++
++GET /api/v1/admin/wallets
++
++GET /api/v1/admin/wallets/{id}
++
++PATCH /api/v1/admin/wallets/{id}/block
++
++PATCH /api/v1/admin/wallets/{id}/unblock
++
++Search
++
++- `search` query parameter is supported on the collection endpoint.
++
++Rules
++
++- Admin APIs do not allow wallet balance adjustment.
++
++---
++
++## Payment Administration
++
++GET /api/v1/admin/payments
++
++GET /api/v1/admin/payments/{id}
++
++Search
++
++- `search` query parameter is supported on the collection endpoint.
++
++Rules
++
++- Payments remain immutable.
++- No delete, update, reversal, or refund endpoint exists.
++
++---
++
++## Transaction Administration
++
++GET /api/v1/admin/transactions
++
++GET /api/v1/admin/transactions/{id}
++
++Search
++
++- `search` query parameter is supported on the collection endpoint.
++
++Rules
++
++- Transactions remain immutable.
++
++---
++
++## Notification Administration
++
++GET /api/v1/admin/notifications
++
++GET /api/v1/admin/notifications/{id}
++
++Search
++
++- `search` query parameter is supported on the collection endpoint.
++
++Rules
++
++- Admin notification endpoints are read-only.
+ 
+ ---
+ 
+diff --git a/document/V1/Architecture/Database_Design.md b/document/V1/Architecture/Database_Design.md
+index 14ca14b..659078d 100644
+--- a/document/V1/Architecture/Database_Design.md
++++ b/document/V1/Architecture/Database_Design.md
+@@ -681,6 +681,32 @@ Rules
+ 
+ ---
+ 
++## admin
++
++Owner Module
++
++admin
++
++Purpose
++
++Provides administrative visibility and orchestration across existing modules.
++
++Database Impact
++
++No admin-owned database tables are created in Version 1.
++
++Rules
++
++- Admin module owns no business data.
++- Admin module must not access repositories owned by other modules directly.
++- Admin reads and modifies data only through owning module services.
++
++Migration
++
++None.
++
++---
++
+ # 21. Approval
+ 
+ Status
+diff --git a/src/main/java/com/monika/payflow/admin/controller/AdminController.java b/src/main/java/com/monika/payflow/admin/controller/AdminController.java
+new file mode 100644
+index 0000000..cdeee4d
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/admin/controller/AdminController.java
+@@ -0,0 +1,148 @@
++package com.monika.payflow.admin.controller;
++
++import com.monika.payflow.admin.dto.AdminDashboardResponse;
++import com.monika.payflow.admin.dto.AdminRoleUpdateRequest;
++import com.monika.payflow.admin.dto.AdminUserUpdateRequest;
++import com.monika.payflow.admin.service.AdminService;
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.common.constants.AppConstants;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.user.dto.UserAdminResponse;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.wallet.dto.WalletResponse;
++import jakarta.validation.Valid;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PatchMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.PutMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.List;
++import java.util.UUID;
++
++@RestController
++@RequestMapping(AppConstants.API_BASE_PATH + "/admin")
++public class AdminController {
++
++    private final AdminService adminService;
++
++    public AdminController(AdminService adminService) {
++        this.adminService = adminService;
++    }
++
++    @GetMapping("/dashboard")
++    public ResponseEntity<ApiResponse<AdminDashboardResponse>> getDashboard() {
++        return ResponseEntity.ok(ApiResponse.success("Admin dashboard retrieved successfully", adminService.getDashboard()));
++    }
++
++    @GetMapping("/users")
++    public ResponseEntity<ApiResponse<List<UserAdminResponse>>> getUsers(@RequestParam(required = false) String search) {
++        return ResponseEntity.ok(ApiResponse.success("Admin users retrieved successfully", adminService.getUsers(search)));
++    }
++
++    @GetMapping("/users/{id}")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> getUser(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user retrieved successfully", adminService.getUser(id)));
++    }
++
++    @PutMapping("/users/{id}")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> updateUser(
++            @PathVariable UUID id,
++            @Valid @RequestBody AdminUserUpdateRequest request
++    ) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user updated successfully", adminService.updateUser(id, request)));
++    }
++
++    @PatchMapping("/users/{id}/activate")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> activateUser(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user activated successfully", adminService.activateUser(id)));
++    }
++
++    @PatchMapping("/users/{id}/deactivate")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> deactivateUser(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user deactivated successfully", adminService.deactivateUser(id)));
++    }
++
++    @PatchMapping("/users/{id}/block")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> blockUser(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user blocked successfully", adminService.blockUser(id)));
++    }
++
++    @PatchMapping("/users/{id}/unblock")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> unblockUser(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user unblocked successfully", adminService.unblockUser(id)));
++    }
++
++    @GetMapping("/users/{id}/roles")
++    public ResponseEntity<ApiResponse<UserRole>> getUserRole(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin user role retrieved successfully", adminService.getUserRole(id)));
++    }
++
++    @PatchMapping("/users/{id}/roles")
++    public ResponseEntity<ApiResponse<UserAdminResponse>> updateUserRole(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @PathVariable UUID id,
++            @Valid @RequestBody AdminRoleUpdateRequest request
++    ) {
++        UserAdminResponse response = adminService.updateUserRole(currentUser.id(), id, request.role());
++        return ResponseEntity.ok(ApiResponse.success("Admin user role updated successfully", response));
++    }
++
++    @GetMapping("/wallets")
++    public ResponseEntity<ApiResponse<List<WalletResponse>>> getWallets(@RequestParam(required = false) String search) {
++        return ResponseEntity.ok(ApiResponse.success("Admin wallets retrieved successfully", adminService.getWallets(search)));
++    }
++
++    @GetMapping("/wallets/{id}")
++    public ResponseEntity<ApiResponse<WalletResponse>> getWallet(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin wallet retrieved successfully", adminService.getWallet(id)));
++    }
++
++    @PatchMapping("/wallets/{id}/block")
++    public ResponseEntity<ApiResponse<WalletResponse>> blockWallet(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin wallet blocked successfully", adminService.blockWallet(id)));
++    }
++
++    @PatchMapping("/wallets/{id}/unblock")
++    public ResponseEntity<ApiResponse<WalletResponse>> unblockWallet(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin wallet unblocked successfully", adminService.unblockWallet(id)));
++    }
++
++    @GetMapping("/payments")
++    public ResponseEntity<ApiResponse<List<PaymentResponse>>> getPayments(@RequestParam(required = false) String search) {
++        return ResponseEntity.ok(ApiResponse.success("Admin payments retrieved successfully", adminService.getPayments(search)));
++    }
++
++    @GetMapping("/payments/{id}")
++    public ResponseEntity<ApiResponse<PaymentResponse>> getPayment(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin payment retrieved successfully", adminService.getPayment(id)));
++    }
++
++    @GetMapping("/transactions")
++    public ResponseEntity<ApiResponse<List<TransactionResponse>>> getTransactions(@RequestParam(required = false) String search) {
++        return ResponseEntity.ok(ApiResponse.success("Admin transactions retrieved successfully", adminService.getTransactions(search)));
++    }
++
++    @GetMapping("/transactions/{id}")
++    public ResponseEntity<ApiResponse<TransactionResponse>> getTransaction(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin transaction retrieved successfully", adminService.getTransaction(id)));
++    }
++
++    @GetMapping("/notifications")
++    public ResponseEntity<ApiResponse<List<NotificationResponse>>> getNotifications(@RequestParam(required = false) String search) {
++        return ResponseEntity.ok(ApiResponse.success("Admin notifications retrieved successfully", adminService.getNotifications(search)));
++    }
++
++    @GetMapping("/notifications/{id}")
++    public ResponseEntity<ApiResponse<NotificationResponse>> getNotification(@PathVariable UUID id) {
++        return ResponseEntity.ok(ApiResponse.success("Admin notification retrieved successfully", adminService.getNotification(id)));
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/admin/dto/AdminDashboardResponse.java b/src/main/java/com/monika/payflow/admin/dto/AdminDashboardResponse.java
+new file mode 100644
+index 0000000..a282103
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/admin/dto/AdminDashboardResponse.java
+@@ -0,0 +1,17 @@
++package com.monika.payflow.admin.dto;
++
++import java.math.BigDecimal;
++
++public record AdminDashboardResponse(
++        long totalUsers,
++        long activeUsers,
++        long blockedUsers,
++        long totalWallets,
++        long totalPayments,
++        long totalTransactions,
++        long totalNotifications,
++        BigDecimal totalWalletBalance,
++        long todaysPayments,
++        long todaysTransactions
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/admin/dto/AdminRoleUpdateRequest.java b/src/main/java/com/monika/payflow/admin/dto/AdminRoleUpdateRequest.java
+new file mode 100644
+index 0000000..66b275b
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/admin/dto/AdminRoleUpdateRequest.java
+@@ -0,0 +1,10 @@
++package com.monika.payflow.admin.dto;
++
++import com.monika.payflow.user.entity.UserRole;
++import jakarta.validation.constraints.NotNull;
++
++public record AdminRoleUpdateRequest(
++        @NotNull(message = "role is required")
++        UserRole role
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/admin/dto/AdminUserUpdateRequest.java b/src/main/java/com/monika/payflow/admin/dto/AdminUserUpdateRequest.java
+new file mode 100644
+index 0000000..f760082
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/admin/dto/AdminUserUpdateRequest.java
+@@ -0,0 +1,11 @@
++package com.monika.payflow.admin.dto;
++
++import com.monika.payflow.user.entity.UserStatus;
++import jakarta.validation.constraints.Email;
++
++public record AdminUserUpdateRequest(
++        @Email(message = "email must be valid")
++        String email,
++        UserStatus status
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/admin/service/AdminService.java b/src/main/java/com/monika/payflow/admin/service/AdminService.java
+new file mode 100644
+index 0000000..aa027ad
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/admin/service/AdminService.java
+@@ -0,0 +1,147 @@
++package com.monika.payflow.admin.service;
++
++import com.monika.payflow.admin.dto.AdminDashboardResponse;
++import com.monika.payflow.admin.dto.AdminUserUpdateRequest;
++import com.monika.payflow.common.error.ErrorCode;
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.notification.service.NotificationService;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.payment.service.PaymentService;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.transaction.service.TransactionService;
++import com.monika.payflow.user.dto.UserAdminResponse;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.service.UserAccountService;
++import com.monika.payflow.wallet.dto.WalletResponse;
++import com.monika.payflow.wallet.service.WalletService;
++import org.springframework.stereotype.Service;
++
++import java.time.Instant;
++import java.time.LocalDate;
++import java.time.ZoneOffset;
++import java.util.List;
++import java.util.UUID;
++
++@Service
++public class AdminService {
++
++    private final UserAccountService userAccountService;
++    private final WalletService walletService;
++    private final PaymentService paymentService;
++    private final TransactionService transactionService;
++    private final NotificationService notificationService;
++
++    public AdminService(
++            UserAccountService userAccountService,
++            WalletService walletService,
++            PaymentService paymentService,
++            TransactionService transactionService,
++            NotificationService notificationService
++    ) {
++        this.userAccountService = userAccountService;
++        this.walletService = walletService;
++        this.paymentService = paymentService;
++        this.transactionService = transactionService;
++        this.notificationService = notificationService;
++    }
++
++    public AdminDashboardResponse getDashboard() {
++        Instant todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC);
++        return new AdminDashboardResponse(
++                userAccountService.countUsers(),
++                userAccountService.countActiveUsers(),
++                userAccountService.countBlockedUsers(),
++                walletService.countWallets(),
++                paymentService.countPayments(),
++                transactionService.countTransactions(),
++                notificationService.countNotifications(),
++                walletService.getTotalWalletBalance(),
++                paymentService.countPaymentsCreatedSince(todayStart),
++                transactionService.countTransactionsCreatedSince(todayStart)
++        );
++    }
++
++    public List<UserAdminResponse> getUsers(String search) {
++        return userAccountService.getUsersForAdmin(search);
++    }
++
++    public UserAdminResponse getUser(UUID userId) {
++        return userAccountService.getUserForAdmin(userId);
++    }
++
++    public UserAdminResponse updateUser(UUID userId, AdminUserUpdateRequest request) {
++        return userAccountService.updateUserForAdmin(userId, request.email(), request.status());
++    }
++
++    public UserAdminResponse activateUser(UUID userId) {
++        return userAccountService.activateUser(userId);
++    }
++
++    public UserAdminResponse deactivateUser(UUID userId) {
++        return userAccountService.deactivateUser(userId);
++    }
++
++    public UserAdminResponse blockUser(UUID userId) {
++        return userAccountService.deactivateUser(userId);
++    }
++
++    public UserAdminResponse unblockUser(UUID userId) {
++        return userAccountService.activateUser(userId);
++    }
++
++    public UserRole getUserRole(UUID userId) {
++        return userAccountService.getUserForAdmin(userId).role();
++    }
++
++    public UserAdminResponse updateUserRole(UUID currentAdminUserId, UUID targetUserId, UserRole role) {
++        if (currentAdminUserId.equals(targetUserId)) {
++            throw new BadRequestException(
++                    ErrorCode.ADMIN_SELF_ROLE_CHANGE_NOT_ALLOWED.defaultMessage(),
++                    ErrorCode.ADMIN_SELF_ROLE_CHANGE_NOT_ALLOWED
++            );
++        }
++
++        return userAccountService.updateUserRole(targetUserId, role);
++    }
++
++    public List<WalletResponse> getWallets(String search) {
++        return walletService.getWalletsForAdmin(search);
++    }
++
++    public WalletResponse getWallet(UUID walletId) {
++        return walletService.getWalletForAdmin(walletId);
++    }
++
++    public WalletResponse blockWallet(UUID walletId) {
++        return walletService.blockWallet(walletId);
++    }
++
++    public WalletResponse unblockWallet(UUID walletId) {
++        return walletService.unblockWallet(walletId);
++    }
++
++    public List<PaymentResponse> getPayments(String search) {
++        return paymentService.getPaymentsForAdmin(search);
++    }
++
++    public PaymentResponse getPayment(UUID paymentId) {
++        return paymentService.getPaymentForAdmin(paymentId);
++    }
++
++    public List<TransactionResponse> getTransactions(String search) {
++        return transactionService.getTransactionsForAdmin(search);
++    }
++
++    public TransactionResponse getTransaction(UUID transactionId) {
++        return transactionService.getTransactionForAdmin(transactionId);
++    }
++
++    public List<NotificationResponse> getNotifications(String search) {
++        return notificationService.getNotificationsForAdmin(search);
++    }
++
++    public NotificationResponse getNotification(UUID notificationId) {
++        return notificationService.getNotificationForAdmin(notificationId);
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/common/config/SecurityConfig.java b/src/main/java/com/monika/payflow/common/config/SecurityConfig.java
+index 0839321..9a9ef5c 100644
+--- a/src/main/java/com/monika/payflow/common/config/SecurityConfig.java
++++ b/src/main/java/com/monika/payflow/common/config/SecurityConfig.java
+@@ -3,6 +3,7 @@ package com.monika.payflow.common.config;
+ import com.monika.payflow.auth.security.JwtAuthenticationEntryPoint;
+ import com.monika.payflow.auth.security.JwtAuthenticationFilter;
+ import com.monika.payflow.auth.security.JwtProperties;
++import com.monika.payflow.common.constants.AppConstants;
+ import org.springframework.boot.context.properties.EnableConfigurationProperties;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.context.annotation.Bean;
+@@ -64,6 +65,7 @@ public class SecurityConfig {
+                 .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthenticationEntryPoint))
+                 .authorizeHttpRequests(auth -> auth
+                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
++                        .requestMatchers(AppConstants.API_BASE_PATH + "/admin/**").hasRole("ADMIN")
+                         .anyRequest().authenticated()
+                 )
+                 .authenticationProvider(authenticationProvider)
+diff --git a/src/main/java/com/monika/payflow/common/error/ErrorCode.java b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+index 72bcab2..4678fe3 100644
+--- a/src/main/java/com/monika/payflow/common/error/ErrorCode.java
++++ b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+@@ -15,10 +15,12 @@ public enum ErrorCode {
+     WALLET_NOT_FOUND("PF-404-002", "Wallet was not found", HttpStatus.NOT_FOUND),
+     WALLET_ALREADY_EXISTS("PF-409-002", "Wallet already exists for this user", HttpStatus.CONFLICT),
+     INSUFFICIENT_WALLET_BALANCE("PF-400-004", "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
++    WALLET_BLOCKED("PF-400-007", "Wallet is blocked", HttpStatus.BAD_REQUEST),
+     TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
+     PAYMENT_NOT_FOUND("PF-404-004", "Payment was not found", HttpStatus.NOT_FOUND),
+     PAYMENT_SELF_TRANSFER_NOT_ALLOWED("PF-400-005", "Users cannot transfer money to themselves", HttpStatus.BAD_REQUEST),
+     NOTIFICATION_NOT_FOUND("PF-404-005", "Notification was not found", HttpStatus.NOT_FOUND),
++    ADMIN_SELF_ROLE_CHANGE_NOT_ALLOWED("PF-400-006", "Administrators cannot modify their own role", HttpStatus.BAD_REQUEST),
+     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
+ 
+     private final String code;
+diff --git a/src/main/java/com/monika/payflow/notification/service/NotificationService.java b/src/main/java/com/monika/payflow/notification/service/NotificationService.java
+index d12f6e8..35fe608 100644
+--- a/src/main/java/com/monika/payflow/notification/service/NotificationService.java
++++ b/src/main/java/com/monika/payflow/notification/service/NotificationService.java
+@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
++import java.util.Comparator;
+ import java.util.List;
+ import java.util.UUID;
+ 
+@@ -96,6 +97,31 @@ public class NotificationService implements NotificationRecorder {
+         return toResponse(notification);
+     }
+ 
++    @Transactional(readOnly = true)
++    public List<NotificationResponse> getNotificationsForAdmin(String search) {
++        return notificationRepository.findAll()
++                .stream()
++                .filter(notification -> matchesSearch(notification, search))
++                .sorted(Comparator.comparing(Notification::createdAt).reversed())
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public NotificationResponse getNotificationForAdmin(UUID notificationId) {
++        Notification notification = notificationRepository.findById(notificationId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.NOTIFICATION_NOT_FOUND.defaultMessage(),
++                        ErrorCode.NOTIFICATION_NOT_FOUND
++                ));
++        return toResponse(notification);
++    }
++
++    @Transactional(readOnly = true)
++    public long countNotifications() {
++        return notificationRepository.count();
++    }
++
+     private void createUnread(UUID userId, NotificationType notificationType, String title, String message) {
+         Notification notification = new Notification(
+                 userId,
+@@ -125,6 +151,21 @@ public class NotificationService implements NotificationRecorder {
+         return amount.setScale(2).toPlainString();
+     }
+ 
++    private boolean matchesSearch(Notification notification, String search) {
++        if (search == null || search.isBlank()) {
++            return true;
++        }
++
++        String normalizedSearch = search.trim().toLowerCase();
++        return notification.id().toString().contains(normalizedSearch)
++                || notification.userId().toString().contains(normalizedSearch)
++                || notification.notificationType().name().toLowerCase().contains(normalizedSearch)
++                || notification.status().name().toLowerCase().contains(normalizedSearch)
++                || notification.title().toLowerCase().contains(normalizedSearch)
++                || notification.message().toLowerCase().contains(normalizedSearch)
++                || notification.referenceNumber().toLowerCase().contains(normalizedSearch);
++    }
++
+     private NotificationResponse toResponse(Notification notification) {
+         return new NotificationResponse(
+                 notification.id(),
+diff --git a/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java b/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java
+index c484dca..a37cafc 100644
+--- a/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java
++++ b/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java
+@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
++import java.time.Instant;
+ 
+ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
+ 
+@@ -28,4 +29,6 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
+               )
+             """)
+     Optional<Payment> findUserPaymentById(@Param("paymentId") UUID paymentId, @Param("userId") UUID userId);
++
++    long countByCreatedAtGreaterThanEqual(Instant createdAt);
+ }
+diff --git a/src/main/java/com/monika/payflow/payment/service/PaymentService.java b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+index 3ff8a76..4983468 100644
+--- a/src/main/java/com/monika/payflow/payment/service/PaymentService.java
++++ b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
++import java.time.Instant;
+ import java.util.List;
+ import java.util.UUID;
+ 
+@@ -107,6 +108,36 @@ public class PaymentService {
+         return toResponse(payment);
+     }
+ 
++    @Transactional(readOnly = true)
++    public List<PaymentResponse> getPaymentsForAdmin(String search) {
++        return paymentRepository.findAll()
++                .stream()
++                .filter(payment -> matchesSearch(payment, search))
++                .sorted((left, right) -> right.createdAt().compareTo(left.createdAt()))
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public PaymentResponse getPaymentForAdmin(UUID paymentId) {
++        Payment payment = paymentRepository.findById(paymentId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.PAYMENT_NOT_FOUND.defaultMessage(),
++                        ErrorCode.PAYMENT_NOT_FOUND
++                ));
++        return toResponse(payment);
++    }
++
++    @Transactional(readOnly = true)
++    public long countPayments() {
++        return paymentRepository.count();
++    }
++
++    @Transactional(readOnly = true)
++    public long countPaymentsCreatedSince(Instant createdAt) {
++        return paymentRepository.countByCreatedAtGreaterThanEqual(createdAt);
++    }
++
+     private BigDecimal normalizeAmount(BigDecimal amount) {
+         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) {
+             throw new BadRequestException(ErrorCode.BAD_REQUEST.defaultMessage());
+@@ -127,6 +158,20 @@ public class PaymentService {
+         return description.trim();
+     }
+ 
++    private boolean matchesSearch(Payment payment, String search) {
++        if (search == null || search.isBlank()) {
++            return true;
++        }
++
++        String normalizedSearch = search.trim().toLowerCase();
++        return payment.id().toString().contains(normalizedSearch)
++                || payment.senderWalletId().toString().contains(normalizedSearch)
++                || payment.receiverWalletId().toString().contains(normalizedSearch)
++                || payment.referenceNumber().toLowerCase().contains(normalizedSearch)
++                || payment.status().name().toLowerCase().contains(normalizedSearch)
++                || payment.description().toLowerCase().contains(normalizedSearch);
++    }
++
+     private PaymentResponse toResponse(Payment payment) {
+         return new PaymentResponse(
+                 payment.id(),
+diff --git a/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java b/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java
+index 8697fce..42fdc31 100644
+--- a/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java
++++ b/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java
+@@ -6,10 +6,13 @@ import org.springframework.data.jpa.repository.JpaRepository;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
++import java.time.Instant;
+ 
+ public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
+ 
+     List<Transaction> findByWallet_User_IdOrderByCreatedAtDesc(UUID userId);
+ 
+     Optional<Transaction> findByIdAndWallet_User_Id(UUID id, UUID userId);
++
++    long countByCreatedAtGreaterThanEqual(Instant createdAt);
+ }
+diff --git a/src/main/java/com/monika/payflow/transaction/service/TransactionService.java b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+index c23988f..263f4c8 100644
+--- a/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
++++ b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.Comparator;
+ import java.util.List;
+ import java.util.UUID;
+ 
+@@ -70,6 +72,36 @@ public class TransactionService implements TransactionRecorder {
+         return toResponse(transaction);
+     }
+ 
++    @Transactional(readOnly = true)
++    public List<TransactionResponse> getTransactionsForAdmin(String search) {
++        return transactionRepository.findAll()
++                .stream()
++                .filter(transaction -> matchesSearch(transaction, search))
++                .sorted(Comparator.comparing(Transaction::createdAt).reversed())
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public TransactionResponse getTransactionForAdmin(UUID transactionId) {
++        Transaction transaction = transactionRepository.findById(transactionId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.TRANSACTION_NOT_FOUND.defaultMessage(),
++                        ErrorCode.TRANSACTION_NOT_FOUND
++                ));
++        return toResponse(transaction);
++    }
++
++    @Transactional(readOnly = true)
++    public long countTransactions() {
++        return transactionRepository.count();
++    }
++
++    @Transactional(readOnly = true)
++    public long countTransactionsCreatedSince(Instant createdAt) {
++        return transactionRepository.countByCreatedAtGreaterThanEqual(createdAt);
++    }
++
+     private void record(
+             Wallet wallet,
+             TransactionType transactionType,
+@@ -106,6 +138,20 @@ public class TransactionService implements TransactionRecorder {
+         return REFERENCE_PREFIX + UUID.randomUUID();
+     }
+ 
++    private boolean matchesSearch(Transaction transaction, String search) {
++        if (search == null || search.isBlank()) {
++            return true;
++        }
++
++        String normalizedSearch = search.trim().toLowerCase();
++        return transaction.id().toString().contains(normalizedSearch)
++                || transaction.walletId().toString().contains(normalizedSearch)
++                || transaction.transactionType().name().toLowerCase().contains(normalizedSearch)
++                || transaction.status().name().toLowerCase().contains(normalizedSearch)
++                || transaction.referenceNumber().toLowerCase().contains(normalizedSearch)
++                || transaction.description().toLowerCase().contains(normalizedSearch);
++    }
++
+     private TransactionResponse toResponse(Transaction transaction) {
+         return new TransactionResponse(
+                 transaction.id(),
+diff --git a/src/main/java/com/monika/payflow/user/dto/UserAdminResponse.java b/src/main/java/com/monika/payflow/user/dto/UserAdminResponse.java
+new file mode 100644
+index 0000000..9f9b4b5
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/user/dto/UserAdminResponse.java
+@@ -0,0 +1,14 @@
++package com.monika.payflow.user.dto;
++
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++
++import java.util.UUID;
++
++public record UserAdminResponse(
++        UUID id,
++        String email,
++        UserRole role,
++        UserStatus status
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/user/entity/User.java b/src/main/java/com/monika/payflow/user/entity/User.java
+index 514f44d..50b44a8 100644
+--- a/src/main/java/com/monika/payflow/user/entity/User.java
++++ b/src/main/java/com/monika/payflow/user/entity/User.java
+@@ -82,4 +82,16 @@ public class User {
+     public UserStatus status() {
+         return status;
+     }
++
++    public void updateEmail(String email) {
++        this.email = email;
++    }
++
++    public void updateStatus(UserStatus status) {
++        this.status = status;
++    }
++
++    public void updateRole(UserRole role) {
++        this.role = role;
++    }
+ }
+diff --git a/src/main/java/com/monika/payflow/user/repository/UserRepository.java b/src/main/java/com/monika/payflow/user/repository/UserRepository.java
+index ec44485..74c3ab8 100644
+--- a/src/main/java/com/monika/payflow/user/repository/UserRepository.java
++++ b/src/main/java/com/monika/payflow/user/repository/UserRepository.java
+@@ -1,6 +1,7 @@
+ package com.monika.payflow.user.repository;
+ 
+ import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserStatus;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+ import java.util.Optional;
+@@ -11,4 +12,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
+     Optional<User> findByEmail(String email);
+ 
+     boolean existsByEmail(String email);
++
++    long countByStatus(UserStatus status);
+ }
+diff --git a/src/main/java/com/monika/payflow/user/service/UserAccountService.java b/src/main/java/com/monika/payflow/user/service/UserAccountService.java
+index d74ce8f..d165c64 100644
+--- a/src/main/java/com/monika/payflow/user/service/UserAccountService.java
++++ b/src/main/java/com/monika/payflow/user/service/UserAccountService.java
+@@ -3,10 +3,17 @@ package com.monika.payflow.user.service;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.user.entity.UserRole;
+ import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.dto.UserAdminResponse;
+ import com.monika.payflow.user.repository.UserRepository;
++import com.monika.payflow.common.error.ErrorCode;
++import com.monika.payflow.common.exception.ConflictException;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
+ import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
+ 
++import java.util.List;
+ import java.util.Optional;
++import java.util.UUID;
+ 
+ @Service
+ public class UserAccountService {
+@@ -29,4 +36,97 @@ public class UserAccountService {
+         User user = new User(email, encodedPassword, UserRole.USER, UserStatus.ACTIVE);
+         return userRepository.save(user);
+     }
++
++    @Transactional(readOnly = true)
++    public List<UserAdminResponse> getUsersForAdmin(String search) {
++        return userRepository.findAll()
++                .stream()
++                .filter(user -> matchesSearch(user, search))
++                .map(this::toAdminResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public UserAdminResponse getUserForAdmin(UUID userId) {
++        return toAdminResponse(findUserById(userId));
++    }
++
++    @Transactional
++    public UserAdminResponse updateUserForAdmin(UUID userId, String email, UserStatus status) {
++        User user = findUserById(userId);
++
++        if (email != null && !email.isBlank()) {
++            String normalizedEmail = email.trim().toLowerCase();
++            if (!normalizedEmail.equals(user.email()) && userRepository.existsByEmail(normalizedEmail)) {
++                throw new ConflictException(ErrorCode.EMAIL_ALREADY_EXISTS.defaultMessage(), ErrorCode.EMAIL_ALREADY_EXISTS);
++            }
++            user.updateEmail(normalizedEmail);
++        }
++
++        if (status != null) {
++            user.updateStatus(status);
++        }
++
++        return toAdminResponse(user);
++    }
++
++    @Transactional
++    public UserAdminResponse activateUser(UUID userId) {
++        User user = findUserById(userId);
++        user.updateStatus(UserStatus.ACTIVE);
++        return toAdminResponse(user);
++    }
++
++    @Transactional
++    public UserAdminResponse deactivateUser(UUID userId) {
++        User user = findUserById(userId);
++        user.updateStatus(UserStatus.DISABLED);
++        return toAdminResponse(user);
++    }
++
++    @Transactional
++    public UserAdminResponse updateUserRole(UUID userId, UserRole role) {
++        User user = findUserById(userId);
++        user.updateRole(role);
++        return toAdminResponse(user);
++    }
++
++    @Transactional(readOnly = true)
++    public long countUsers() {
++        return userRepository.count();
++    }
++
++    @Transactional(readOnly = true)
++    public long countActiveUsers() {
++        return userRepository.countByStatus(UserStatus.ACTIVE);
++    }
++
++    @Transactional(readOnly = true)
++    public long countBlockedUsers() {
++        return userRepository.countByStatus(UserStatus.DISABLED);
++    }
++
++    private User findUserById(UUID userId) {
++        return userRepository.findById(userId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.RESOURCE_NOT_FOUND.defaultMessage(),
++                        ErrorCode.RESOURCE_NOT_FOUND
++                ));
++    }
++
++    private boolean matchesSearch(User user, String search) {
++        if (search == null || search.isBlank()) {
++            return true;
++        }
++
++        String normalizedSearch = search.trim().toLowerCase();
++        return user.email().toLowerCase().contains(normalizedSearch)
++                || user.id().toString().contains(normalizedSearch)
++                || user.role().name().toLowerCase().contains(normalizedSearch)
++                || user.status().name().toLowerCase().contains(normalizedSearch);
++    }
++
++    private UserAdminResponse toAdminResponse(User user) {
++        return new UserAdminResponse(user.id(), user.email(), user.role(), user.status());
++    }
+ }
+diff --git a/src/main/java/com/monika/payflow/wallet/entity/Wallet.java b/src/main/java/com/monika/payflow/wallet/entity/Wallet.java
+index cc9bd11..b517652 100644
+--- a/src/main/java/com/monika/payflow/wallet/entity/Wallet.java
++++ b/src/main/java/com/monika/payflow/wallet/entity/Wallet.java
+@@ -99,4 +99,8 @@ public class Wallet {
+     public void updateBalance(BigDecimal balance) {
+         this.balance = balance;
+     }
++
++    public void updateStatus(WalletStatus status) {
++        this.status = status;
++    }
+ }
+diff --git a/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java b/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
+index d3c4599..853cb3f 100644
+--- a/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
++++ b/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
+@@ -1,6 +1,7 @@
+ package com.monika.payflow.wallet.repository;
+ 
+ import com.monika.payflow.wallet.entity.Wallet;
++import com.monika.payflow.wallet.entity.WalletStatus;
+ import jakarta.persistence.LockModeType;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ import org.springframework.data.jpa.repository.Lock;
+@@ -9,6 +10,7 @@ import org.springframework.data.repository.query.Param;
+ 
+ import java.util.Collection;
+ import java.util.List;
++import java.math.BigDecimal;
+ import java.util.Optional;
+ import java.util.UUID;
+ 
+@@ -25,4 +27,9 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
+     @Lock(LockModeType.PESSIMISTIC_WRITE)
+     @Query("select wallet from Wallet wallet where wallet.user.id in :userIds order by wallet.id")
+     List<Wallet> findByUserIdInForUpdate(@Param("userIds") Collection<UUID> userIds);
++
++    long countByStatus(WalletStatus status);
++
++    @Query("select coalesce(sum(wallet.balance), 0) from Wallet wallet")
++    BigDecimal sumWalletBalances();
+ }
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletService.java b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+index 8f4485d..ec9d460 100644
+--- a/src/main/java/com/monika/payflow/wallet/service/WalletService.java
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+@@ -60,9 +60,24 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+         return toResponse(wallet);
+     }
+ 
++    @Transactional(readOnly = true)
++    public List<WalletResponse> getWalletsForAdmin(String search) {
++        return walletRepository.findAll()
++                .stream()
++                .filter(wallet -> matchesSearch(wallet, search))
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public WalletResponse getWalletForAdmin(UUID walletId) {
++        return toResponse(findWalletById(walletId));
++    }
++
+     @Transactional
+     public WalletResponse deposit(UUID userId, BigDecimal amount) {
+         Wallet wallet = findWalletForUpdate(userId);
++        validateWalletIsActive(wallet);
+         BigDecimal normalizedAmount = normalizeAmount(amount);
+         BigDecimal balanceBefore = wallet.balance();
+         BigDecimal balanceAfter = balanceBefore.add(normalizedAmount);
+@@ -77,6 +92,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+     @Transactional
+     public WalletResponse withdraw(UUID userId, BigDecimal amount) {
+         Wallet wallet = findWalletForUpdate(userId);
++        validateWalletIsActive(wallet);
+         BigDecimal normalizedAmount = normalizeAmount(amount);
+         BigDecimal balanceBefore = wallet.balance();
+ 
+@@ -102,6 +118,8 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+         Map<UUID, Wallet> walletsByUserId = findWalletsForUpdate(senderUserId, receiverUserId);
+         Wallet senderWallet = walletsByUserId.get(senderUserId);
+         Wallet receiverWallet = walletsByUserId.get(receiverUserId);
++        validateWalletIsActive(senderWallet);
++        validateWalletIsActive(receiverWallet);
+ 
+         WalletBalanceChange senderChange = debit(senderWallet, normalizedAmount);
+         WalletBalanceChange receiverChange = credit(receiverWallet, normalizedAmount);
+@@ -109,6 +127,30 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+         return new WalletTransferResult(senderChange, receiverChange);
+     }
+ 
++    @Transactional
++    public WalletResponse blockWallet(UUID walletId) {
++        Wallet wallet = findWalletById(walletId);
++        wallet.updateStatus(WalletStatus.BLOCKED);
++        return toResponse(wallet);
++    }
++
++    @Transactional
++    public WalletResponse unblockWallet(UUID walletId) {
++        Wallet wallet = findWalletById(walletId);
++        wallet.updateStatus(WalletStatus.ACTIVE);
++        return toResponse(wallet);
++    }
++
++    @Transactional(readOnly = true)
++    public long countWallets() {
++        return walletRepository.count();
++    }
++
++    @Transactional(readOnly = true)
++    public BigDecimal getTotalWalletBalance() {
++        return walletRepository.sumWalletBalances().setScale(2);
++    }
++
+     private Wallet findWallet(UUID userId) {
+         return walletRepository.findByUserId(userId)
+                 .orElseThrow(() -> new ResourceNotFoundException(
+@@ -125,6 +167,14 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+                 ));
+     }
+ 
++    private Wallet findWalletById(UUID walletId) {
++        return walletRepository.findById(walletId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
++                        ErrorCode.WALLET_NOT_FOUND
++                ));
++    }
++
+     private Map<UUID, Wallet> findWalletsForUpdate(UUID senderUserId, UUID receiverUserId) {
+         List<Wallet> wallets = walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId));
+         Map<UUID, Wallet> walletsByUserId = wallets.stream()
+@@ -141,6 +191,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+     }
+ 
+     private WalletBalanceChange debit(Wallet wallet, BigDecimal amount) {
++        validateWalletIsActive(wallet);
+         BigDecimal balanceBefore = wallet.balance();
+ 
+         if (balanceBefore.compareTo(amount) < 0) {
+@@ -156,6 +207,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+     }
+ 
+     private WalletBalanceChange credit(Wallet wallet, BigDecimal amount) {
++        validateWalletIsActive(wallet);
+         BigDecimal balanceBefore = wallet.balance();
+         BigDecimal balanceAfter = balanceBefore.add(amount);
+         wallet.updateBalance(balanceAfter);
+@@ -170,6 +222,27 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+         return amount.setScale(2);
+     }
+ 
++    private void validateWalletIsActive(Wallet wallet) {
++        if (wallet.status() == WalletStatus.BLOCKED) {
++            throw new BadRequestException(
++                    ErrorCode.WALLET_BLOCKED.defaultMessage(),
++                    ErrorCode.WALLET_BLOCKED
++            );
++        }
++    }
++
++    private boolean matchesSearch(Wallet wallet, String search) {
++        if (search == null || search.isBlank()) {
++            return true;
++        }
++
++        String normalizedSearch = search.trim().toLowerCase();
++        return wallet.id().toString().contains(normalizedSearch)
++                || wallet.userId().toString().contains(normalizedSearch)
++                || wallet.currency().toLowerCase().contains(normalizedSearch)
++                || wallet.status().name().toLowerCase().contains(normalizedSearch);
++    }
++
+     private WalletResponse toResponse(Wallet wallet) {
+         return new WalletResponse(
+                 wallet.id(),
+diff --git a/src/test/java/com/monika/payflow/admin/controller/AdminControllerTest.java b/src/test/java/com/monika/payflow/admin/controller/AdminControllerTest.java
+new file mode 100644
+index 0000000..c0fa0f5
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/admin/controller/AdminControllerTest.java
+@@ -0,0 +1,82 @@
++package com.monika.payflow.admin.controller;
++
++import com.monika.payflow.admin.dto.AdminDashboardResponse;
++import com.monika.payflow.admin.dto.AdminRoleUpdateRequest;
++import com.monika.payflow.admin.service.AdminService;
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.user.dto.UserAdminResponse;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.http.ResponseEntity;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class AdminControllerTest {
++
++    @Mock
++    private AdminService adminService;
++
++    @InjectMocks
++    private AdminController adminController;
++
++    @Test
++    void getDashboardReturnsStandardApiResponse() {
++        AdminDashboardResponse dashboard = new AdminDashboardResponse(
++                10L,
++                8L,
++                2L,
++                10L,
++                7L,
++                14L,
++                20L,
++                new BigDecimal("1250.50"),
++                3L,
++                6L
++        );
++        when(adminService.getDashboard()).thenReturn(dashboard);
++
++        ResponseEntity<ApiResponse<AdminDashboardResponse>> response = adminController.getDashboard();
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().data()).isEqualTo(dashboard);
++    }
++
++    @Test
++    void updateUserRoleReturnsStandardApiResponse() {
++        UUID currentAdminId = UUID.randomUUID();
++        UUID targetUserId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(currentAdminId);
++        AdminRoleUpdateRequest request = new AdminRoleUpdateRequest(UserRole.ADMIN);
++        UserAdminResponse user = new UserAdminResponse(targetUserId, "admin@example.com", UserRole.ADMIN, UserStatus.ACTIVE);
++        when(adminService.updateUserRole(currentAdminId, targetUserId, UserRole.ADMIN)).thenReturn(user);
++
++        ResponseEntity<ApiResponse<UserAdminResponse>> response =
++                adminController.updateUserRole(currentUser, targetUserId, request);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().message()).isEqualTo("Admin user role updated successfully");
++        assertThat(response.getBody().data()).isEqualTo(user);
++    }
++
++    private AuthUserDetails currentUser(UUID userId) {
++        User user = new User("admin@example.com", "encoded-password", UserRole.ADMIN, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return new AuthUserDetails(user);
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/admin/security/AdminAuthorizationTest.java b/src/test/java/com/monika/payflow/admin/security/AdminAuthorizationTest.java
+new file mode 100644
+index 0000000..bd78f40
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/admin/security/AdminAuthorizationTest.java
+@@ -0,0 +1,59 @@
++package com.monika.payflow.admin.security;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.auth.security.JwtService;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.repository.UserRepository;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.test.web.servlet.MockMvc;
++
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++@SpringBootTest(properties = {
++        "payflow.security.jwt.secret=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",
++        "spring.datasource.url=jdbc:h2:mem:admin_auth_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
++        "spring.datasource.driver-class-name=org.h2.Driver",
++        "spring.datasource.username=sa",
++        "spring.datasource.password=",
++        "spring.jpa.hibernate.ddl-auto=create-drop",
++        "spring.flyway.enabled=false"
++})
++@AutoConfigureMockMvc
++class AdminAuthorizationTest {
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @Autowired
++    private UserRepository userRepository;
++
++    @Autowired
++    private JwtService jwtService;
++
++    @Test
++    void adminUserCanAccessAdminEndpoints() throws Exception {
++        String token = tokenFor(UserRole.ADMIN, "admin-auth@example.com");
++
++        mockMvc.perform(get("/api/v1/admin/dashboard").header("Authorization", "Bearer " + token))
++                .andExpect(status().isOk());
++    }
++
++    @Test
++    void regularUserCannotAccessAdminEndpoints() throws Exception {
++        String token = tokenFor(UserRole.USER, "user-auth@example.com");
++
++        mockMvc.perform(get("/api/v1/admin/dashboard").header("Authorization", "Bearer " + token))
++                .andExpect(status().isForbidden());
++    }
++
++    private String tokenFor(UserRole role, String email) {
++        User user = userRepository.save(new User(email, "encoded-password", role, UserStatus.ACTIVE));
++        return jwtService.generateAccessToken(new AuthUserDetails(user));
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/admin/service/AdminServiceTest.java b/src/test/java/com/monika/payflow/admin/service/AdminServiceTest.java
+new file mode 100644
+index 0000000..206443e
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/admin/service/AdminServiceTest.java
+@@ -0,0 +1,128 @@
++package com.monika.payflow.admin.service;
++
++import com.monika.payflow.admin.dto.AdminDashboardResponse;
++import com.monika.payflow.admin.dto.AdminUserUpdateRequest;
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.notification.service.NotificationService;
++import com.monika.payflow.payment.service.PaymentService;
++import com.monika.payflow.transaction.service.TransactionService;
++import com.monika.payflow.user.dto.UserAdminResponse;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.service.UserAccountService;
++import com.monika.payflow.wallet.dto.WalletResponse;
++import com.monika.payflow.wallet.entity.WalletStatus;
++import com.monika.payflow.wallet.service.WalletService;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class AdminServiceTest {
++
++    @Mock
++    private UserAccountService userAccountService;
++
++    @Mock
++    private WalletService walletService;
++
++    @Mock
++    private PaymentService paymentService;
++
++    @Mock
++    private TransactionService transactionService;
++
++    @Mock
++    private NotificationService notificationService;
++
++    @InjectMocks
++    private AdminService adminService;
++
++    @Test
++    void getDashboardAggregatesStatisticsFromOwnedModuleServices() {
++        when(userAccountService.countUsers()).thenReturn(10L);
++        when(userAccountService.countActiveUsers()).thenReturn(8L);
++        when(userAccountService.countBlockedUsers()).thenReturn(2L);
++        when(walletService.countWallets()).thenReturn(10L);
++        when(walletService.getTotalWalletBalance()).thenReturn(new BigDecimal("1250.50"));
++        when(paymentService.countPayments()).thenReturn(7L);
++        when(paymentService.countPaymentsCreatedSince(any(Instant.class))).thenReturn(3L);
++        when(transactionService.countTransactions()).thenReturn(14L);
++        when(transactionService.countTransactionsCreatedSince(any(Instant.class))).thenReturn(6L);
++        when(notificationService.countNotifications()).thenReturn(20L);
++
++        AdminDashboardResponse response = adminService.getDashboard();
++
++        assertThat(response.totalUsers()).isEqualTo(10L);
++        assertThat(response.activeUsers()).isEqualTo(8L);
++        assertThat(response.blockedUsers()).isEqualTo(2L);
++        assertThat(response.totalWallets()).isEqualTo(10L);
++        assertThat(response.totalWalletBalance()).isEqualByComparingTo("1250.50");
++        assertThat(response.todaysPayments()).isEqualTo(3L);
++        assertThat(response.todaysTransactions()).isEqualTo(6L);
++    }
++
++    @Test
++    void updateUserDelegatesToUserService() {
++        UUID userId = UUID.randomUUID();
++        AdminUserUpdateRequest request = new AdminUserUpdateRequest("Monika@Example.com", UserStatus.ACTIVE);
++        UserAdminResponse user = new UserAdminResponse(userId, "monika@example.com", UserRole.USER, UserStatus.ACTIVE);
++        when(userAccountService.updateUserForAdmin(userId, request.email(), request.status())).thenReturn(user);
++
++        UserAdminResponse response = adminService.updateUser(userId, request);
++
++        assertThat(response).isEqualTo(user);
++    }
++
++    @Test
++    void updateUserRoleRejectsSelfRoleChange() {
++        UUID currentAdminId = UUID.randomUUID();
++
++        assertThatThrownBy(() -> adminService.updateUserRole(currentAdminId, currentAdminId, UserRole.USER))
++                .isInstanceOf(BadRequestException.class);
++    }
++
++    @Test
++    void updateUserRoleDelegatesForOtherUser() {
++        UUID currentAdminId = UUID.randomUUID();
++        UUID targetUserId = UUID.randomUUID();
++        UserAdminResponse user = new UserAdminResponse(targetUserId, "admin@example.com", UserRole.ADMIN, UserStatus.ACTIVE);
++        when(userAccountService.updateUserRole(targetUserId, UserRole.ADMIN)).thenReturn(user);
++
++        UserAdminResponse response = adminService.updateUserRole(currentAdminId, targetUserId, UserRole.ADMIN);
++
++        assertThat(response).isEqualTo(user);
++    }
++
++    @Test
++    void blockWalletDelegatesToWalletService() {
++        UUID walletId = UUID.randomUUID();
++        WalletResponse wallet = new WalletResponse(
++                walletId,
++                UUID.randomUUID(),
++                BigDecimal.ZERO.setScale(2),
++                "INR",
++                WalletStatus.BLOCKED,
++                Instant.now(),
++                Instant.now()
++        );
++        when(walletService.blockWallet(walletId)).thenReturn(wallet);
++
++        WalletResponse response = adminService.blockWallet(walletId);
++
++        assertThat(response.status()).isEqualTo(WalletStatus.BLOCKED);
++        verify(walletService).blockWallet(walletId);
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+index 5287eb8..d0332a5 100644
+--- a/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
++++ b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+@@ -119,6 +119,20 @@ class PaymentServiceTest {
+         verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder, notificationRecorder);
+     }
+ 
++    @Test
++    void transferDoesNotCreatePaymentLedgerOrNotificationsWhenWalletValidationFails() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        PaymentTransferRequest request = new PaymentTransferRequest(receiverUserId, new BigDecimal("30.00"), "Dinner");
++        when(walletTransferService.transferBetweenUsers(senderUserId, receiverUserId, new BigDecimal("30.00")))
++                .thenThrow(new BadRequestException("Wallet is blocked"));
++
++        assertThatThrownBy(() -> paymentService.transfer(senderUserId, request))
++                .isInstanceOf(BadRequestException.class);
++
++        verifyNoInteractions(paymentRepository, transactionRecorder, notificationRecorder);
++    }
++
+     @Test
+     void getPaymentHistoryReturnsUserPayments() {
+         UUID userId = UUID.randomUUID();
+diff --git a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+index 39e9e9e..3f97e3e 100644
+--- a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
++++ b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+@@ -160,6 +160,36 @@ class WalletServiceTest {
+         verifyNoInteractions(notificationRecorder);
+     }
+ 
++    @Test
++    void depositRejectsBlockedWalletBeforeBalanceMutation() {
++        UUID userId = UUID.randomUUID();
++        Wallet wallet = wallet(userId, "20.00");
++        wallet.updateStatus(WalletStatus.BLOCKED);
++        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
++
++        assertThatThrownBy(() -> walletService.deposit(userId, new BigDecimal("10.00")))
++                .isInstanceOf(BadRequestException.class);
++
++        assertThat(wallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
++    }
++
++    @Test
++    void withdrawRejectsBlockedWalletBeforeBalanceMutation() {
++        UUID userId = UUID.randomUUID();
++        Wallet wallet = wallet(userId, "20.00");
++        wallet.updateStatus(WalletStatus.BLOCKED);
++        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
++
++        assertThatThrownBy(() -> walletService.withdraw(userId, new BigDecimal("10.00")))
++                .isInstanceOf(BadRequestException.class);
++
++        assertThat(wallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
++    }
++
+     @Test
+     void transferBetweenUsersDebitsSenderAndCreditsReceiverWithoutRecordingWalletLedgerEntries() {
+         UUID senderUserId = UUID.randomUUID();
+@@ -206,6 +236,50 @@ class WalletServiceTest {
+         verifyNoInteractions(notificationRecorder);
+     }
+ 
++    @Test
++    void transferBetweenUsersRejectsBlockedSenderBeforeBalanceMutation() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, "100.00");
++        senderWallet.updateStatus(WalletStatus.BLOCKED);
++        Wallet receiverWallet = wallet(receiverUserId, "20.00");
++        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
++                .thenReturn(List.of(senderWallet, receiverWallet));
++
++        assertThatThrownBy(() -> walletService.transferBetweenUsers(
++                senderUserId,
++                receiverUserId,
++                new BigDecimal("30.00")
++        )).isInstanceOf(BadRequestException.class);
++
++        assertThat(senderWallet.balance()).isEqualByComparingTo("100.00");
++        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
++    }
++
++    @Test
++    void transferBetweenUsersRejectsBlockedReceiverBeforeBalanceMutation() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, "100.00");
++        Wallet receiverWallet = wallet(receiverUserId, "20.00");
++        receiverWallet.updateStatus(WalletStatus.BLOCKED);
++        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
++                .thenReturn(List.of(senderWallet, receiverWallet));
++
++        assertThatThrownBy(() -> walletService.transferBetweenUsers(
++                senderUserId,
++                receiverUserId,
++                new BigDecimal("30.00")
++        )).isInstanceOf(BadRequestException.class);
++
++        assertThat(senderWallet.balance()).isEqualByComparingTo("100.00");
++        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
++    }
++
+     @Test
+     void transferBetweenUsersRejectsMissingReceiverWallet() {
+         UUID senderUserId = UUID.randomUUID();
+@@ -221,6 +295,30 @@ class WalletServiceTest {
+         )).isInstanceOf(ResourceNotFoundException.class);
+     }
+ 
++    @Test
++    void unblockWalletRestoresDepositOperations() {
++        UUID userId = UUID.randomUUID();
++        UUID walletId = UUID.randomUUID();
++        Wallet wallet = wallet(userId, "20.00");
++        ReflectionTestUtils.setField(wallet, "id", walletId);
++        wallet.updateStatus(WalletStatus.BLOCKED);
++        when(walletRepository.findById(walletId)).thenReturn(Optional.of(wallet));
++        when(walletRepository.findByUserIdForUpdate(userId)).thenReturn(Optional.of(wallet));
++
++        WalletResponse unblockedWallet = walletService.unblockWallet(walletId);
++        WalletResponse depositResponse = walletService.deposit(userId, new BigDecimal("10.00"));
++
++        assertThat(unblockedWallet.status()).isEqualTo(WalletStatus.ACTIVE);
++        assertThat(depositResponse.balance()).isEqualByComparingTo("30.00");
++        verify(transactionRecorder).recordDeposit(
++                wallet,
++                new BigDecimal("10.00"),
++                new BigDecimal("20.00"),
++                new BigDecimal("30.00")
++        );
++        verify(notificationRecorder).recordDeposit(userId, new BigDecimal("10.00"));
++    }
++
+     private Wallet wallet(UUID userId, String balance) {
+         return new Wallet(user(userId), new BigDecimal(balance), "INR", WalletStatus.ACTIVE);
+     }

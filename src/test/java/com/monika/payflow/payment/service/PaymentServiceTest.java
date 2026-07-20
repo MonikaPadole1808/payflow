@@ -120,6 +120,20 @@ class PaymentServiceTest {
     }
 
     @Test
+    void transferDoesNotCreatePaymentLedgerOrNotificationsWhenWalletValidationFails() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        PaymentTransferRequest request = new PaymentTransferRequest(receiverUserId, new BigDecimal("30.00"), "Dinner");
+        when(walletTransferService.transferBetweenUsers(senderUserId, receiverUserId, new BigDecimal("30.00")))
+                .thenThrow(new BadRequestException("Wallet is blocked"));
+
+        assertThatThrownBy(() -> paymentService.transfer(senderUserId, request))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(paymentRepository, transactionRecorder, notificationRecorder);
+    }
+
+    @Test
     void getPaymentHistoryReturnsUserPayments() {
         UUID userId = UUID.randomUUID();
         Payment payment = payment(UUID.randomUUID(), UUID.randomUUID());

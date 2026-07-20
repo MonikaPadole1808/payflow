@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -107,6 +108,36 @@ public class PaymentService {
         return toResponse(payment);
     }
 
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> getPaymentsForAdmin(String search) {
+        return paymentRepository.findAll()
+                .stream()
+                .filter(payment -> matchesSearch(payment, search))
+                .sorted((left, right) -> right.createdAt().compareTo(left.createdAt()))
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentResponse getPaymentForAdmin(UUID paymentId) {
+        Payment payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorCode.PAYMENT_NOT_FOUND.defaultMessage(),
+                        ErrorCode.PAYMENT_NOT_FOUND
+                ));
+        return toResponse(payment);
+    }
+
+    @Transactional(readOnly = true)
+    public long countPayments() {
+        return paymentRepository.count();
+    }
+
+    @Transactional(readOnly = true)
+    public long countPaymentsCreatedSince(Instant createdAt) {
+        return paymentRepository.countByCreatedAtGreaterThanEqual(createdAt);
+    }
+
     private BigDecimal normalizeAmount(BigDecimal amount) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) {
             throw new BadRequestException(ErrorCode.BAD_REQUEST.defaultMessage());
@@ -125,6 +156,20 @@ public class PaymentService {
         }
 
         return description.trim();
+    }
+
+    private boolean matchesSearch(Payment payment, String search) {
+        if (search == null || search.isBlank()) {
+            return true;
+        }
+
+        String normalizedSearch = search.trim().toLowerCase();
+        return payment.id().toString().contains(normalizedSearch)
+                || payment.senderWalletId().toString().contains(normalizedSearch)
+                || payment.receiverWalletId().toString().contains(normalizedSearch)
+                || payment.referenceNumber().toLowerCase().contains(normalizedSearch)
+                || payment.status().name().toLowerCase().contains(normalizedSearch)
+                || payment.description().toLowerCase().contains(normalizedSearch);
     }
 
     private PaymentResponse toResponse(Payment payment) {
