@@ -1,0 +1,1875 @@
+{
+  "info": {
+    "name": "PayFlow V1",
+    "description": "Production-quality Postman collection generated from the PayFlow V1 Spring Boot controllers, DTOs, security configuration, and API contract. Base URL is configurable through the PayFlow Local environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api/v1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "description": "Public authentication endpoints. Login responses store tokens from data.accessToken and data.refreshToken.",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ],
+              "query": []
+            },
+            "description": "Register the regular USER account defined by userEmail/userPassword. Registration also provisions a wallet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('accessToken', json.data.accessToken);",
+                  "pm.environment.set('refreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Receiver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{receiverEmail}}\",\n  \"password\": \"{{receiverPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Register a receiver USER account for wallet-to-wallet transfer testing."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('receiverAccessToken', json.data.accessToken);",
+                  "pm.environment.set('receiverRefreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Receiver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{receiverEmail}}\",\n  \"password\": \"{{receiverPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login as receiver and save receiverAccessToken for receiver wallet lookup."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('receiverAccessToken', json.data.accessToken);",
+                  "pm.environment.set('receiverRefreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ],
+              "query": []
+            },
+            "description": "Login as the regular user and save accessToken and refreshToken.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('accessToken', json.data.accessToken);",
+                  "pm.environment.set('refreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ],
+              "query": []
+            },
+            "description": "Login as an existing ADMIN account and save adminAccessToken. Create/promote an ADMIN as described in README.md.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('adminAccessToken', json.data.accessToken);",
+                  "pm.environment.set('adminRefreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ],
+              "query": []
+            },
+            "description": "Refresh USER tokens using the saved refreshToken.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "pm.environment.set('accessToken', json.data.accessToken);",
+                  "pm.environment.set('refreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "description": "Authenticated USER wallet operations. Uses accessToken.",
+      "item": [
+        {
+          "name": "Get Wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/wallet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet"
+              ],
+              "query": []
+            },
+            "description": "Retrieve the authenticated user wallet and save walletId/userId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  if (json.data.id) pm.environment.set('walletId', json.data.id);",
+                  "  if (json.data.userId) pm.environment.set('userId', json.data.userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/wallet/deposit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "deposit"
+              ],
+              "query": []
+            },
+            "description": "Deposit a valid positive amount into the authenticated user wallet.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 250\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  if (json.data.id) pm.environment.set('walletId', json.data.id);",
+                  "  if (json.data.userId) pm.environment.set('userId', json.data.userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Withdraw",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/wallet/withdraw",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "withdraw"
+              ],
+              "query": []
+            },
+            "description": "Withdraw a valid positive amount from the authenticated user wallet.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  if (json.data.id) pm.environment.set('walletId', json.data.id);",
+                  "  if (json.data.userId) pm.environment.set('userId', json.data.userId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Receiver Wallet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/wallet",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet"
+              ],
+              "query": []
+            },
+            "description": "Run after logging in as receiver to save receiverUserId and receiverWalletId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{receiverAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  if (json.data.userId) pm.environment.set('receiverUserId', json.data.userId);",
+                  "  if (json.data.id) pm.environment.set('receiverWalletId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "description": "Authenticated USER payment APIs. Transfer requires receiverUserId.",
+      "item": [
+        {
+          "name": "Transfer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payments/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "transfer"
+              ],
+              "query": []
+            },
+            "description": "Transfer funds from authenticated user to receiverUserId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiverUserId\": \"{{receiverUserId}}\",\n  \"amount\": 50,\n  \"description\": \"Postman wallet transfer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data) {",
+                  "  if (json.data.id) pm.environment.set('paymentId', json.data.id);",
+                  "  if (json.data.senderWalletId) pm.environment.set('walletId', json.data.senderWalletId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payment History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments"
+              ],
+              "query": []
+            },
+            "description": "Return payment history for authenticated user and save first paymentId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('paymentId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payment Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payments",
+                "{{paymentId}}"
+              ],
+              "query": []
+            },
+            "description": "Return one payment owned by authenticated user.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('paymentId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "description": "Authenticated USER transaction history APIs.",
+      "item": [
+        {
+          "name": "Transaction History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": []
+            },
+            "description": "Return authenticated user transactions newest first and save first transactionId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('transactionId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Transaction Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions",
+                "{{transactionId}}"
+              ],
+              "query": []
+            },
+            "description": "Return one transaction owned by authenticated user.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('transactionId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "description": "Authenticated USER notification APIs.",
+      "item": [
+        {
+          "name": "Notification History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ],
+              "query": []
+            },
+            "description": "Return authenticated user notifications newest first and save first notificationId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('notificationId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Notification Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{notificationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{notificationId}}"
+              ],
+              "query": []
+            },
+            "description": "Return one notification owned by authenticated user.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('notificationId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark As Read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/{{notificationId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "{{notificationId}}",
+                "read"
+              ],
+              "query": []
+            },
+            "description": "Mark a notification as READ. Operation is idempotent.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('notificationId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Dashboard",
+      "description": "ADMIN-only dashboard endpoint. Uses adminAccessToken.",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard"
+              ],
+              "query": []
+            },
+            "description": "Return aggregate platform statistics for admins.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin User Management",
+      "description": "ADMIN-only user management. Admin module orchestrates through owning services.",
+      "item": [
+        {
+          "name": "List/Search Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List or search users. Saves a userId from the result.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0) {",
+                  "  const nonAdmin = json.data.find(u => u.role !== 'ADMIN') || json.data[0];",
+                  "  pm.environment.set('userId', nonAdmin.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "User Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}"
+              ],
+              "query": []
+            },
+            "description": "Get one user by id.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}"
+              ],
+              "query": []
+            },
+            "description": "Update user email and/or status. Both fields are optional in the DTO.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"updated.user{{$timestamp}}@example.com\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Activate",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "activate"
+              ],
+              "query": []
+            },
+            "description": "Set user status to ACTIVE.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deactivate",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/deactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "deactivate"
+              ],
+              "query": []
+            },
+            "description": "Set user status to DISABLED.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Block",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "block"
+              ],
+              "query": []
+            },
+            "description": "Block user; current implementation maps this to DISABLED.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unblock",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/unblock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "unblock"
+              ],
+              "query": []
+            },
+            "description": "Unblock user; current implementation maps this to ACTIVE.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Role",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "roles"
+              ],
+              "query": []
+            },
+            "description": "Get user role. Response data is a role string.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{userId}}",
+                "roles"
+              ],
+              "query": []
+            },
+            "description": "Update user role to USER or ADMIN. Admins cannot modify their own role.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"USER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('userId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Wallet Management",
+      "description": "ADMIN-only wallet visibility and block/unblock operations. No balance adjustment API exists.",
+      "item": [
+        {
+          "name": "List/Search Wallets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/wallets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "wallets"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List or search wallets and save first walletId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('walletId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wallet Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/wallets/{{walletId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "wallets",
+                "{{walletId}}"
+              ],
+              "query": []
+            },
+            "description": "Get one wallet by id.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('walletId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Block Wallet",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/wallets/{{walletId}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "wallets",
+                "{{walletId}}",
+                "block"
+              ],
+              "query": []
+            },
+            "description": "Set wallet status to BLOCKED. Blocked wallets cannot deposit, withdraw, send, or receive payments.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('walletId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unblock Wallet",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/wallets/{{walletId}}/unblock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "wallets",
+                "{{walletId}}",
+                "unblock"
+              ],
+              "query": []
+            },
+            "description": "Set wallet status to ACTIVE.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('walletId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Payments",
+      "description": "ADMIN-only read-only payment visibility.",
+      "item": [
+        {
+          "name": "List/Search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "payments"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List or search payments and save first paymentId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('paymentId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "payments",
+                "{{paymentId}}"
+              ],
+              "query": []
+            },
+            "description": "Get payment details by id.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('paymentId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Transactions",
+      "description": "ADMIN-only read-only transaction visibility.",
+      "item": [
+        {
+          "name": "List/Search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List or search transactions and save first transactionId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('transactionId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/transactions/{{transactionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "transactions",
+                "{{transactionId}}"
+              ],
+              "query": []
+            },
+            "description": "Get transaction details by id.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('transactionId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Notifications",
+      "description": "ADMIN-only read-only notification visibility.",
+      "item": [
+        {
+          "name": "List/Search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List or search notifications and save first notificationId.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json.data) && json.data.length > 0 && json.data[0].id) { pm.environment.set('notificationId', json.data[0].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notifications/{{notificationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notifications",
+                "{{notificationId}}"
+              ],
+              "query": []
+            },
+            "description": "Get notification details by id.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status code is successful', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "pm.test('response has success=true', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.environment.set('notificationId', json.data.id); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
