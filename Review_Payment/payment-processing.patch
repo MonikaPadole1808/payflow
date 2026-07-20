@@ -1,0 +1,1439 @@
+﻿diff --git a/document/V1/Architecture/API_Contract.md b/document/V1/Architecture/API_Contract.md
+index 714f43d..e83ca13 100644
+--- a/document/V1/Architecture/API_Contract.md
++++ b/document/V1/Architecture/API_Contract.md
+@@ -392,10 +392,143 @@ Validation
+ 
+ # 16. Payment APIs
+ 
+-POST /payments/transfer
++All Payment APIs require authentication.
++
++Authorization
++
++USER
++
++ADMIN
++
++---
++
++## Transfer Money
++
++POST
++
++/api/v1/payments/transfer
+ 
+ Transfer Money
+ 
++Purpose
++
++Transfer money from the authenticated user's wallet to another user's wallet.
++
++Request
++
++{
++"receiverUserId": "uuid",
++"amount": 100.00,
++"description": "Wallet transfer"
++}
++
++Validation
++
++- receiverUserId is required
++- amount is required
++- amount must be greater than 0
++- amount must have up to 17 integer digits and 2 decimal places
++- description must not exceed 255 characters
++- sender and receiver must be different users
++- sender wallet balance must be sufficient
++
++Response
++
++{
++"success": true,
++"message": "Payment transfer completed successfully",
++"data": {
++"id": "uuid",
++"senderWalletId": "uuid",
++"receiverWalletId": "uuid",
++"amount": 100.00,
++"currency": "INR",
++"status": "SUCCESS",
++"referenceNumber": "PAY-uuid",
++"description": "Wallet transfer",
++"createdAt": "timestamp"
++}
++}
++
++Rules
++
++- Transfer processing is atomic.
++- A successful transfer creates one payment record.
++- A successful transfer creates one TRANSFER_OUT ledger record for the sender.
++- A successful transfer creates one TRANSFER_IN ledger record for the receiver.
++- No external payment gateway is used in Version 1.
++
++---
++
++## Payment History
++
++GET
++
++/api/v1/payments
++
++Purpose
++
++Return payments where the authenticated user is the sender or receiver.
++
++Response
++
++{
++"success": true,
++"message": "Payments retrieved successfully",
++"data": [
++{
++"id": "uuid",
++"senderWalletId": "uuid",
++"receiverWalletId": "uuid",
++"amount": 100.00,
++"currency": "INR",
++"status": "SUCCESS",
++"referenceNumber": "PAY-uuid",
++"description": "Wallet transfer",
++"createdAt": "timestamp"
++}
++]
++}
++
++Rules
++
++- Payments are returned newest first.
++- Users can view only payments where they are the sender or receiver.
++
++---
++
++## Payment Details
++
++GET
++
++/api/v1/payments/{id}
++
++Purpose
++
++Return one payment owned by the authenticated user.
++
++Response
++
++{
++"success": true,
++"message": "Payment retrieved successfully",
++"data": {
++"id": "uuid",
++"senderWalletId": "uuid",
++"receiverWalletId": "uuid",
++"amount": 100.00,
++"currency": "INR",
++"status": "SUCCESS",
++"referenceNumber": "PAY-uuid",
++"description": "Wallet transfer",
++"createdAt": "timestamp"
++}
++}
++
++Rules
++
++- Users can view only payments where they are the sender or receiver.
++
+ ---
+ 
+ # 17. Transaction APIs
+@@ -448,6 +581,7 @@ Rules
+ 
+ - Transactions are returned newest first.
+ - Users can view only their own transactions.
++- Version 1 supports DEPOSIT, WITHDRAW, TRANSFER_OUT, and TRANSFER_IN transaction types.
+ 
+ ---
+ 
+diff --git a/document/V1/Architecture/Database_Design.md b/document/V1/Architecture/Database_Design.md
+index 4d7ebc3..3545371 100644
+--- a/document/V1/Architecture/Database_Design.md
++++ b/document/V1/Architecture/Database_Design.md
+@@ -530,7 +530,7 @@ Columns
+ |--------|------|------|
+ | id | UUID | Primary key |
+ | wallet_id | UUID | Required, references wallets(id) |
+-| transaction_type | VARCHAR(30) | Required, DEPOSIT or WITHDRAW |
++| transaction_type | VARCHAR(30) | Required, DEPOSIT, WITHDRAW, TRANSFER_OUT, or TRANSFER_IN |
+ | status | VARCHAR(30) | Required, SUCCESS |
+ | amount | NUMERIC(19,2) | Required, must be positive |
+ | balance_before | NUMERIC(19,2) | Required, cannot be negative |
+@@ -565,6 +565,63 @@ Rules
+ - Transactions are never updated.
+ - Transactions are never deleted.
+ - Deposit and withdraw operations create exactly one SUCCESS transaction after a successful wallet balance change.
++- Wallet-to-wallet transfers create one TRANSFER_OUT transaction for the sender and one TRANSFER_IN transaction for the receiver.
++
++---
++
++## payments
++
++Owner Module
++
++payment
++
++Purpose
++
++Stores successful wallet-to-wallet payment records.
++
++Relationship
++
++One sender wallet and one receiver wallet are linked to each payment.
++
++Columns
++
++| Column | Type | Rule |
++|--------|------|------|
++| id | UUID | Primary key |
++| sender_wallet_id | UUID | Required, references wallets(id) |
++| receiver_wallet_id | UUID | Required, references wallets(id) |
++| amount | NUMERIC(19,2) | Required, must be positive |
++| currency | VARCHAR(3) | Required |
++| status | VARCHAR(30) | Required, SUCCESS |
++| reference_number | VARCHAR(64) | Required, unique |
++| description | VARCHAR(255) | Required |
++| created_at | TIMESTAMPTZ | Required |
++
++Constraints
++
++- `fk_payments_sender_wallet`
++- `fk_payments_receiver_wallet`
++- `uk_payments_reference_number`
++- `ck_payments_distinct_wallets`
++- `ck_payments_amount_positive`
++- `ck_payments_currency_length`
++- `ck_payments_status`
++
++Indexes
++
++- `idx_payments_sender_wallet_created_at`
++- `idx_payments_receiver_wallet_created_at`
++
++Migration
++
++- `V6__create_payments_table.sql`
++
++Rules
++
++- Payment records are created only for successful wallet-to-wallet transfers.
++- A user cannot transfer money to themselves.
++- Every successful payment creates exactly one payment record.
++- Every successful payment creates exactly two transaction ledger records.
+ 
+ ---
+ 
+diff --git a/src/main/java/com/monika/payflow/common/error/ErrorCode.java b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+index 1435755..c0d3fc8 100644
+--- a/src/main/java/com/monika/payflow/common/error/ErrorCode.java
++++ b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+@@ -16,6 +16,8 @@ public enum ErrorCode {
+     WALLET_ALREADY_EXISTS("PF-409-002", "Wallet already exists for this user", HttpStatus.CONFLICT),
+     INSUFFICIENT_WALLET_BALANCE("PF-400-004", "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
+     TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
++    PAYMENT_NOT_FOUND("PF-404-004", "Payment was not found", HttpStatus.NOT_FOUND),
++    PAYMENT_SELF_TRANSFER_NOT_ALLOWED("PF-400-005", "Users cannot transfer money to themselves", HttpStatus.BAD_REQUEST),
+     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
+ 
+     private final String code;
+diff --git a/src/main/java/com/monika/payflow/payment/controller/PaymentController.java b/src/main/java/com/monika/payflow/payment/controller/PaymentController.java
+new file mode 100644
+index 0000000..76dfb0a
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/controller/PaymentController.java
+@@ -0,0 +1,57 @@
++package com.monika.payflow.payment.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.common.constants.AppConstants;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.payment.dto.PaymentTransferRequest;
++import com.monika.payflow.payment.service.PaymentService;
++import jakarta.validation.Valid;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.PostMapping;
++import org.springframework.web.bind.annotation.RequestBody;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.List;
++import java.util.UUID;
++
++@RestController
++@RequestMapping(AppConstants.API_BASE_PATH + "/payments")
++public class PaymentController {
++
++    private final PaymentService paymentService;
++
++    public PaymentController(PaymentService paymentService) {
++        this.paymentService = paymentService;
++    }
++
++    @PostMapping("/transfer")
++    public ResponseEntity<ApiResponse<PaymentResponse>> transfer(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @Valid @RequestBody PaymentTransferRequest request
++    ) {
++        PaymentResponse response = paymentService.transfer(currentUser.id(), request);
++        return ResponseEntity.ok(ApiResponse.success("Payment transfer completed successfully", response));
++    }
++
++    @GetMapping
++    public ResponseEntity<ApiResponse<List<PaymentResponse>>> getPaymentHistory(
++            @AuthenticationPrincipal AuthUserDetails currentUser
++    ) {
++        List<PaymentResponse> response = paymentService.getPaymentHistory(currentUser.id());
++        return ResponseEntity.ok(ApiResponse.success("Payments retrieved successfully", response));
++    }
++
++    @GetMapping("/{id}")
++    public ResponseEntity<ApiResponse<PaymentResponse>> getPayment(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @PathVariable UUID id
++    ) {
++        PaymentResponse response = paymentService.getPayment(currentUser.id(), id);
++        return ResponseEntity.ok(ApiResponse.success("Payment retrieved successfully", response));
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/payment/dto/PaymentResponse.java b/src/main/java/com/monika/payflow/payment/dto/PaymentResponse.java
+new file mode 100644
+index 0000000..37f490f
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/dto/PaymentResponse.java
+@@ -0,0 +1,20 @@
++package com.monika.payflow.payment.dto;
++
++import com.monika.payflow.payment.entity.PaymentStatus;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++public record PaymentResponse(
++        UUID id,
++        UUID senderWalletId,
++        UUID receiverWalletId,
++        BigDecimal amount,
++        String currency,
++        PaymentStatus status,
++        String referenceNumber,
++        String description,
++        Instant createdAt
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/payment/dto/PaymentTransferRequest.java b/src/main/java/com/monika/payflow/payment/dto/PaymentTransferRequest.java
+new file mode 100644
+index 0000000..b2d0977
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/dto/PaymentTransferRequest.java
+@@ -0,0 +1,23 @@
++package com.monika.payflow.payment.dto;
++
++import jakarta.validation.constraints.DecimalMin;
++import jakarta.validation.constraints.Digits;
++import jakarta.validation.constraints.NotNull;
++import jakarta.validation.constraints.Size;
++
++import java.math.BigDecimal;
++import java.util.UUID;
++
++public record PaymentTransferRequest(
++        @NotNull(message = "receiverUserId is required")
++        UUID receiverUserId,
++
++        @NotNull(message = "amount is required")
++        @DecimalMin(value = "0.01", message = "amount must be greater than 0")
++        @Digits(integer = 17, fraction = 2, message = "amount must have up to 17 integer digits and 2 decimal places")
++        BigDecimal amount,
++
++        @Size(max = 255, message = "description must not exceed 255 characters")
++        String description
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/payment/entity/Payment.java b/src/main/java/com/monika/payflow/payment/entity/Payment.java
+new file mode 100644
+index 0000000..b0b3b8d
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/entity/Payment.java
+@@ -0,0 +1,124 @@
++package com.monika.payflow.payment.entity;
++
++import com.monika.payflow.wallet.entity.Wallet;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.EnumType;
++import jakarta.persistence.Enumerated;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "payments")
++public class Payment {
++
++    @Id
++    @GeneratedValue
++    private UUID id;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "sender_wallet_id", nullable = false)
++    private Wallet senderWallet;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "receiver_wallet_id", nullable = false)
++    private Wallet receiverWallet;
++
++    @Column(nullable = false, precision = 19, scale = 2)
++    private BigDecimal amount;
++
++    @Column(nullable = false, length = 3)
++    private String currency;
++
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, length = 30)
++    private PaymentStatus status;
++
++    @Column(nullable = false, name = "reference_number", length = 64, unique = true)
++    private String referenceNumber;
++
++    @Column(nullable = false, length = 255)
++    private String description;
++
++    @Column(nullable = false, name = "created_at", updatable = false)
++    private Instant createdAt;
++
++    protected Payment() {
++    }
++
++    public Payment(
++            Wallet senderWallet,
++            Wallet receiverWallet,
++            BigDecimal amount,
++            String currency,
++            PaymentStatus status,
++            String referenceNumber,
++            String description
++    ) {
++        this.senderWallet = senderWallet;
++        this.receiverWallet = receiverWallet;
++        this.amount = amount;
++        this.currency = currency;
++        this.status = status;
++        this.referenceNumber = referenceNumber;
++        this.description = description;
++    }
++
++    @PrePersist
++    void prePersist() {
++        this.createdAt = Instant.now();
++    }
++
++    public UUID id() {
++        return id;
++    }
++
++    public UUID senderWalletId() {
++        return senderWallet.id();
++    }
++
++    public UUID receiverWalletId() {
++        return receiverWallet.id();
++    }
++
++    public UUID senderUserId() {
++        return senderWallet.userId();
++    }
++
++    public UUID receiverUserId() {
++        return receiverWallet.userId();
++    }
++
++    public BigDecimal amount() {
++        return amount;
++    }
++
++    public String currency() {
++        return currency;
++    }
++
++    public PaymentStatus status() {
++        return status;
++    }
++
++    public String referenceNumber() {
++        return referenceNumber;
++    }
++
++    public String description() {
++        return description;
++    }
++
++    public Instant createdAt() {
++        return createdAt;
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/payment/entity/PaymentStatus.java b/src/main/java/com/monika/payflow/payment/entity/PaymentStatus.java
+new file mode 100644
+index 0000000..c0a7b79
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/entity/PaymentStatus.java
+@@ -0,0 +1,5 @@
++package com.monika.payflow.payment.entity;
++
++public enum PaymentStatus {
++    SUCCESS
++}
+diff --git a/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java b/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java
+new file mode 100644
+index 0000000..c484dca
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/repository/PaymentRepository.java
+@@ -0,0 +1,31 @@
++package com.monika.payflow.payment.repository;
++
++import com.monika.payflow.payment.entity.Payment;
++import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
++import org.springframework.data.repository.query.Param;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++public interface PaymentRepository extends JpaRepository<Payment, UUID> {
++
++    @Query("""
++            select payment from Payment payment
++            where payment.senderWallet.user.id = :userId
++               or payment.receiverWallet.user.id = :userId
++            order by payment.createdAt desc
++            """)
++    List<Payment> findUserPaymentsOrderByCreatedAtDesc(@Param("userId") UUID userId);
++
++    @Query("""
++            select payment from Payment payment
++            where payment.id = :paymentId
++              and (
++                    payment.senderWallet.user.id = :userId
++                 or payment.receiverWallet.user.id = :userId
++              )
++            """)
++    Optional<Payment> findUserPaymentById(@Param("paymentId") UUID paymentId, @Param("userId") UUID userId);
++}
+diff --git a/src/main/java/com/monika/payflow/payment/service/PaymentService.java b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+new file mode 100644
+index 0000000..8293267
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+@@ -0,0 +1,137 @@
++package com.monika.payflow.payment.service;
++
++import com.monika.payflow.common.error.ErrorCode;
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.payment.dto.PaymentTransferRequest;
++import com.monika.payflow.payment.entity.Payment;
++import com.monika.payflow.payment.entity.PaymentStatus;
++import com.monika.payflow.payment.repository.PaymentRepository;
++import com.monika.payflow.transaction.service.TransactionRecorder;
++import com.monika.payflow.wallet.service.WalletBalanceChange;
++import com.monika.payflow.wallet.service.WalletTransferResult;
++import com.monika.payflow.wallet.service.WalletTransferService;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.UUID;
++
++@Service
++public class PaymentService {
++
++    private static final String REFERENCE_PREFIX = "PAY-";
++    private static final String DEFAULT_DESCRIPTION = "Wallet transfer";
++
++    private final PaymentRepository paymentRepository;
++    private final WalletTransferService walletTransferService;
++    private final TransactionRecorder transactionRecorder;
++
++    public PaymentService(
++            PaymentRepository paymentRepository,
++            WalletTransferService walletTransferService,
++            TransactionRecorder transactionRecorder
++    ) {
++        this.paymentRepository = paymentRepository;
++        this.walletTransferService = walletTransferService;
++        this.transactionRecorder = transactionRecorder;
++    }
++
++    @Transactional
++    public PaymentResponse transfer(UUID senderUserId, PaymentTransferRequest request) {
++        if (senderUserId.equals(request.receiverUserId())) {
++            throw new BadRequestException(
++                    ErrorCode.PAYMENT_SELF_TRANSFER_NOT_ALLOWED.defaultMessage(),
++                    ErrorCode.PAYMENT_SELF_TRANSFER_NOT_ALLOWED
++            );
++        }
++
++        WalletTransferResult transferResult = walletTransferService.transferBetweenUsers(
++                senderUserId,
++                request.receiverUserId(),
++                request.amount()
++        );
++
++        WalletBalanceChange senderChange = transferResult.sender();
++        WalletBalanceChange receiverChange = transferResult.receiver();
++        Payment payment = paymentRepository.save(new Payment(
++                senderChange.wallet(),
++                receiverChange.wallet(),
++                normalizeAmount(request.amount()),
++                senderChange.wallet().currency(),
++                PaymentStatus.SUCCESS,
++                generateReferenceNumber(),
++                resolveDescription(request.description())
++        ));
++
++        transactionRecorder.recordTransferOut(
++                senderChange.wallet(),
++                senderChange.amount(),
++                senderChange.balanceBefore(),
++                senderChange.balanceAfter()
++        );
++        transactionRecorder.recordTransferIn(
++                receiverChange.wallet(),
++                receiverChange.amount(),
++                receiverChange.balanceBefore(),
++                receiverChange.balanceAfter()
++        );
++
++        return toResponse(payment);
++    }
++
++    @Transactional(readOnly = true)
++    public List<PaymentResponse> getPaymentHistory(UUID userId) {
++        return paymentRepository.findUserPaymentsOrderByCreatedAtDesc(userId)
++                .stream()
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public PaymentResponse getPayment(UUID userId, UUID paymentId) {
++        Payment payment = paymentRepository.findUserPaymentById(paymentId, userId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.PAYMENT_NOT_FOUND.defaultMessage(),
++                        ErrorCode.PAYMENT_NOT_FOUND
++                ));
++
++        return toResponse(payment);
++    }
++
++    private BigDecimal normalizeAmount(BigDecimal amount) {
++        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) {
++            throw new BadRequestException(ErrorCode.BAD_REQUEST.defaultMessage());
++        }
++
++        return amount.setScale(2);
++    }
++
++    private String generateReferenceNumber() {
++        return REFERENCE_PREFIX + UUID.randomUUID();
++    }
++
++    private String resolveDescription(String description) {
++        if (description == null || description.isBlank()) {
++            return DEFAULT_DESCRIPTION;
++        }
++
++        return description.trim();
++    }
++
++    private PaymentResponse toResponse(Payment payment) {
++        return new PaymentResponse(
++                payment.id(),
++                payment.senderWalletId(),
++                payment.receiverWalletId(),
++                payment.amount(),
++                payment.currency(),
++                payment.status(),
++                payment.referenceNumber(),
++                payment.description(),
++                payment.createdAt()
++        );
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java b/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java
+index ac965a4..be1a7f0 100644
+--- a/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java
++++ b/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java
+@@ -2,5 +2,7 @@ package com.monika.payflow.transaction.entity;
+ 
+ public enum TransactionType {
+     DEPOSIT,
+-    WITHDRAW
++    WITHDRAW,
++    TRANSFER_OUT,
++    TRANSFER_IN
+ }
+diff --git a/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java b/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java
+index 3a9414f..aab7658 100644
+--- a/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java
++++ b/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java
+@@ -9,4 +9,8 @@ public interface TransactionRecorder {
+     void recordDeposit(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
+ 
+     void recordWithdrawal(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
++
++    void recordTransferOut(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
++
++    void recordTransferIn(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
+ }
+diff --git a/src/main/java/com/monika/payflow/transaction/service/TransactionService.java b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+index 052fff6..c23988f 100644
+--- a/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
++++ b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+@@ -22,6 +22,8 @@ public class TransactionService implements TransactionRecorder {
+     private static final String REFERENCE_PREFIX = "TXN-";
+     private static final String DEPOSIT_DESCRIPTION = "Wallet deposit";
+     private static final String WITHDRAWAL_DESCRIPTION = "Wallet withdrawal";
++    private static final String TRANSFER_OUT_DESCRIPTION = "Wallet transfer sent";
++    private static final String TRANSFER_IN_DESCRIPTION = "Wallet transfer received";
+ 
+     private final TransactionRepository transactionRepository;
+ 
+@@ -39,6 +41,16 @@ public class TransactionService implements TransactionRecorder {
+         record(wallet, TransactionType.WITHDRAW, amount, balanceBefore, balanceAfter, WITHDRAWAL_DESCRIPTION);
+     }
+ 
++    @Override
++    public void recordTransferOut(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
++        record(wallet, TransactionType.TRANSFER_OUT, amount, balanceBefore, balanceAfter, TRANSFER_OUT_DESCRIPTION);
++    }
++
++    @Override
++    public void recordTransferIn(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
++        record(wallet, TransactionType.TRANSFER_IN, amount, balanceBefore, balanceAfter, TRANSFER_IN_DESCRIPTION);
++    }
++
+     @Transactional(readOnly = true)
+     public List<TransactionResponse> getTransactionHistory(UUID userId) {
+         return transactionRepository.findByWallet_User_IdOrderByCreatedAtDesc(userId)
+diff --git a/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java b/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
+index 968d344..d3c4599 100644
+--- a/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
++++ b/src/main/java/com/monika/payflow/wallet/repository/WalletRepository.java
+@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Lock;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ 
++import java.util.Collection;
++import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
+ 
+@@ -19,4 +21,8 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
+     @Lock(LockModeType.PESSIMISTIC_WRITE)
+     @Query("select wallet from Wallet wallet where wallet.user.id = :userId")
+     Optional<Wallet> findByUserIdForUpdate(@Param("userId") UUID userId);
++
++    @Lock(LockModeType.PESSIMISTIC_WRITE)
++    @Query("select wallet from Wallet wallet where wallet.user.id in :userIds order by wallet.id")
++    List<Wallet> findByUserIdInForUpdate(@Param("userIds") Collection<UUID> userIds);
+ }
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletBalanceChange.java b/src/main/java/com/monika/payflow/wallet/service/WalletBalanceChange.java
+new file mode 100644
+index 0000000..21a4ec8
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletBalanceChange.java
+@@ -0,0 +1,13 @@
++package com.monika.payflow.wallet.service;
++
++import com.monika.payflow.wallet.entity.Wallet;
++
++import java.math.BigDecimal;
++
++public record WalletBalanceChange(
++        Wallet wallet,
++        BigDecimal amount,
++        BigDecimal balanceBefore,
++        BigDecimal balanceAfter
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletService.java b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+index 7e4eca7..5a092c2 100644
+--- a/src/main/java/com/monika/payflow/wallet/service/WalletService.java
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+@@ -14,10 +14,13 @@ import org.springframework.stereotype.Service;
+ import org.springframework.transaction.annotation.Transactional;
+ 
+ import java.math.BigDecimal;
++import java.util.List;
++import java.util.Map;
+ import java.util.UUID;
++import java.util.stream.Collectors;
+ 
+ @Service
+-public class WalletService implements WalletProvisioningService {
++public class WalletService implements WalletProvisioningService, WalletTransferService {
+ 
+     private static final BigDecimal ZERO_BALANCE = BigDecimal.ZERO.setScale(2);
+     private static final String DEFAULT_CURRENCY = "INR";
+@@ -83,6 +86,20 @@ public class WalletService implements WalletProvisioningService {
+         return toResponse(wallet);
+     }
+ 
++    @Override
++    @Transactional
++    public WalletTransferResult transferBetweenUsers(UUID senderUserId, UUID receiverUserId, BigDecimal amount) {
++        BigDecimal normalizedAmount = normalizeAmount(amount);
++        Map<UUID, Wallet> walletsByUserId = findWalletsForUpdate(senderUserId, receiverUserId);
++        Wallet senderWallet = walletsByUserId.get(senderUserId);
++        Wallet receiverWallet = walletsByUserId.get(receiverUserId);
++
++        WalletBalanceChange senderChange = debit(senderWallet, normalizedAmount);
++        WalletBalanceChange receiverChange = credit(receiverWallet, normalizedAmount);
++
++        return new WalletTransferResult(senderChange, receiverChange);
++    }
++
+     private Wallet findWallet(UUID userId) {
+         return walletRepository.findByUserId(userId)
+                 .orElseThrow(() -> new ResourceNotFoundException(
+@@ -99,6 +116,43 @@ public class WalletService implements WalletProvisioningService {
+                 ));
+     }
+ 
++    private Map<UUID, Wallet> findWalletsForUpdate(UUID senderUserId, UUID receiverUserId) {
++        List<Wallet> wallets = walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId));
++        Map<UUID, Wallet> walletsByUserId = wallets.stream()
++                .collect(Collectors.toMap(Wallet::userId, wallet -> wallet));
++
++        if (!walletsByUserId.containsKey(senderUserId) || !walletsByUserId.containsKey(receiverUserId)) {
++            throw new ResourceNotFoundException(
++                    ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
++                    ErrorCode.WALLET_NOT_FOUND
++            );
++        }
++
++        return walletsByUserId;
++    }
++
++    private WalletBalanceChange debit(Wallet wallet, BigDecimal amount) {
++        BigDecimal balanceBefore = wallet.balance();
++
++        if (balanceBefore.compareTo(amount) < 0) {
++            throw new BadRequestException(
++                    ErrorCode.INSUFFICIENT_WALLET_BALANCE.defaultMessage(),
++                    ErrorCode.INSUFFICIENT_WALLET_BALANCE
++            );
++        }
++
++        BigDecimal balanceAfter = balanceBefore.subtract(amount);
++        wallet.updateBalance(balanceAfter);
++        return new WalletBalanceChange(wallet, amount, balanceBefore, balanceAfter);
++    }
++
++    private WalletBalanceChange credit(Wallet wallet, BigDecimal amount) {
++        BigDecimal balanceBefore = wallet.balance();
++        BigDecimal balanceAfter = balanceBefore.add(amount);
++        wallet.updateBalance(balanceAfter);
++        return new WalletBalanceChange(wallet, amount, balanceBefore, balanceAfter);
++    }
++
+     private BigDecimal normalizeAmount(BigDecimal amount) {
+         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) {
+             throw new BadRequestException(ErrorCode.BAD_REQUEST.defaultMessage());
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletTransferResult.java b/src/main/java/com/monika/payflow/wallet/service/WalletTransferResult.java
+new file mode 100644
+index 0000000..8b42d15
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletTransferResult.java
+@@ -0,0 +1,7 @@
++package com.monika.payflow.wallet.service;
++
++public record WalletTransferResult(
++        WalletBalanceChange sender,
++        WalletBalanceChange receiver
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletTransferService.java b/src/main/java/com/monika/payflow/wallet/service/WalletTransferService.java
+new file mode 100644
+index 0000000..35dc698
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletTransferService.java
+@@ -0,0 +1,9 @@
++package com.monika.payflow.wallet.service;
++
++import java.math.BigDecimal;
++import java.util.UUID;
++
++public interface WalletTransferService {
++
++    WalletTransferResult transferBetweenUsers(UUID senderUserId, UUID receiverUserId, BigDecimal amount);
++}
+diff --git a/src/main/resources/db/migration/V6__create_payments_table.sql b/src/main/resources/db/migration/V6__create_payments_table.sql
+new file mode 100644
+index 0000000..c7ba81d
+--- /dev/null
++++ b/src/main/resources/db/migration/V6__create_payments_table.sql
+@@ -0,0 +1,27 @@
++ALTER TABLE transactions DROP CONSTRAINT ck_transactions_type;
++
++ALTER TABLE transactions
++    ADD CONSTRAINT ck_transactions_type
++        CHECK (transaction_type IN ('DEPOSIT', 'WITHDRAW', 'TRANSFER_OUT', 'TRANSFER_IN'));
++
++CREATE TABLE payments (
++    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++    sender_wallet_id UUID NOT NULL,
++    receiver_wallet_id UUID NOT NULL,
++    amount NUMERIC(19, 2) NOT NULL,
++    currency VARCHAR(3) NOT NULL,
++    status VARCHAR(30) NOT NULL,
++    reference_number VARCHAR(64) NOT NULL,
++    description VARCHAR(255) NOT NULL,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
++    CONSTRAINT fk_payments_sender_wallet FOREIGN KEY (sender_wallet_id) REFERENCES wallets (id),
++    CONSTRAINT fk_payments_receiver_wallet FOREIGN KEY (receiver_wallet_id) REFERENCES wallets (id),
++    CONSTRAINT uk_payments_reference_number UNIQUE (reference_number),
++    CONSTRAINT ck_payments_distinct_wallets CHECK (sender_wallet_id <> receiver_wallet_id),
++    CONSTRAINT ck_payments_amount_positive CHECK (amount > 0),
++    CONSTRAINT ck_payments_currency_length CHECK (char_length(currency) = 3),
++    CONSTRAINT ck_payments_status CHECK (status IN ('SUCCESS'))
++);
++
++CREATE INDEX idx_payments_sender_wallet_created_at ON payments (sender_wallet_id, created_at DESC);
++CREATE INDEX idx_payments_receiver_wallet_created_at ON payments (receiver_wallet_id, created_at DESC);
+diff --git a/src/test/java/com/monika/payflow/payment/controller/PaymentControllerTest.java b/src/test/java/com/monika/payflow/payment/controller/PaymentControllerTest.java
+new file mode 100644
+index 0000000..2532d94
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/payment/controller/PaymentControllerTest.java
+@@ -0,0 +1,112 @@
++package com.monika.payflow.payment.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.payment.dto.PaymentTransferRequest;
++import com.monika.payflow.payment.entity.PaymentStatus;
++import com.monika.payflow.payment.service.PaymentService;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.http.ResponseEntity;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class PaymentControllerTest {
++
++    @Mock
++    private PaymentService paymentService;
++
++    @InjectMocks
++    private PaymentController paymentController;
++
++    @Test
++    void transferReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        PaymentTransferRequest request = new PaymentTransferRequest(
++                UUID.randomUUID(),
++                new BigDecimal("30.00"),
++                "Dinner"
++        );
++        PaymentResponse payment = paymentResponse(UUID.randomUUID());
++        when(paymentService.transfer(userId, request)).thenReturn(payment);
++
++        ResponseEntity<ApiResponse<PaymentResponse>> response = paymentController.transfer(currentUser, request);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Payment transfer completed successfully");
++        assertThat(response.getBody().data()).isEqualTo(payment);
++    }
++
++    @Test
++    void getPaymentHistoryReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        PaymentResponse payment = paymentResponse(UUID.randomUUID());
++        when(paymentService.getPaymentHistory(userId)).thenReturn(List.of(payment));
++
++        ResponseEntity<ApiResponse<List<PaymentResponse>>> response =
++                paymentController.getPaymentHistory(currentUser);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Payments retrieved successfully");
++        assertThat(response.getBody().data()).containsExactly(payment);
++    }
++
++    @Test
++    void getPaymentReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        UUID paymentId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        PaymentResponse payment = paymentResponse(paymentId);
++        when(paymentService.getPayment(userId, paymentId)).thenReturn(payment);
++
++        ResponseEntity<ApiResponse<PaymentResponse>> response =
++                paymentController.getPayment(currentUser, paymentId);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Payment retrieved successfully");
++        assertThat(response.getBody().data()).isEqualTo(payment);
++    }
++
++    private AuthUserDetails currentUser(UUID userId) {
++        User user = new User("monika@example.com", "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return new AuthUserDetails(user);
++    }
++
++    private PaymentResponse paymentResponse(UUID paymentId) {
++        return new PaymentResponse(
++                paymentId,
++                UUID.randomUUID(),
++                UUID.randomUUID(),
++                new BigDecimal("30.00"),
++                "INR",
++                PaymentStatus.SUCCESS,
++                "PAY-" + UUID.randomUUID(),
++                "Wallet transfer",
++                Instant.now()
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java b/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java
+new file mode 100644
+index 0000000..272828f
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java
+@@ -0,0 +1,80 @@
++package com.monika.payflow.payment.repository;
++
++import com.monika.payflow.payment.entity.Payment;
++import com.monika.payflow.payment.entity.PaymentStatus;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.repository.UserRepository;
++import com.monika.payflow.wallet.entity.Wallet;
++import com.monika.payflow.wallet.entity.WalletStatus;
++import com.monika.payflow.wallet.repository.WalletRepository;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DataJpaTest(properties = {
++        "spring.flyway.enabled=false",
++        "spring.jpa.hibernate.ddl-auto=create-drop"
++})
++class PaymentRepositoryTest {
++
++    @Autowired
++    private UserRepository userRepository;
++
++    @Autowired
++    private WalletRepository walletRepository;
++
++    @Autowired
++    private PaymentRepository paymentRepository;
++
++    @Test
++    void findUserPaymentsOrderByCreatedAtDescReturnsSenderAndReceiverPaymentsOnly() {
++        Wallet firstWallet = wallet("first@example.com");
++        Wallet secondWallet = wallet("second@example.com");
++        Wallet thirdWallet = wallet("third@example.com");
++        Payment sentPayment = paymentRepository.save(payment(firstWallet, secondWallet));
++        Payment receivedPayment = paymentRepository.save(payment(thirdWallet, firstWallet));
++        paymentRepository.save(payment(secondWallet, thirdWallet));
++
++        List<Payment> payments = paymentRepository.findUserPaymentsOrderByCreatedAtDesc(firstWallet.userId());
++
++        assertThat(payments)
++                .extracting(Payment::id)
++                .containsExactly(receivedPayment.id(), sentPayment.id());
++    }
++
++    @Test
++    void findUserPaymentByIdRejectsPaymentsNotOwnedByUser() {
++        Wallet senderWallet = wallet("sender@example.com");
++        Wallet receiverWallet = wallet("receiver@example.com");
++        Wallet otherWallet = wallet("other@example.com");
++        Payment payment = paymentRepository.save(payment(senderWallet, receiverWallet));
++
++        assertThat(paymentRepository.findUserPaymentById(payment.id(), otherWallet.userId()))
++                .isEmpty();
++    }
++
++    private Wallet wallet(String email) {
++        User user = userRepository.save(new User(email, "encoded-password", UserRole.USER, UserStatus.ACTIVE));
++        return walletRepository.save(new Wallet(user, BigDecimal.ZERO.setScale(2), "INR", WalletStatus.ACTIVE));
++    }
++
++    private Payment payment(Wallet senderWallet, Wallet receiverWallet) {
++        return new Payment(
++                senderWallet,
++                receiverWallet,
++                new BigDecimal("30.00"),
++                "INR",
++                PaymentStatus.SUCCESS,
++                "PAY-" + UUID.randomUUID(),
++                "Wallet transfer"
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+new file mode 100644
+index 0000000..ea87e11
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+@@ -0,0 +1,168 @@
++package com.monika.payflow.payment.service;
++
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.payment.dto.PaymentResponse;
++import com.monika.payflow.payment.dto.PaymentTransferRequest;
++import com.monika.payflow.payment.entity.Payment;
++import com.monika.payflow.payment.entity.PaymentStatus;
++import com.monika.payflow.payment.repository.PaymentRepository;
++import com.monika.payflow.transaction.service.TransactionRecorder;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.wallet.entity.Wallet;
++import com.monika.payflow.wallet.entity.WalletStatus;
++import com.monika.payflow.wallet.service.WalletBalanceChange;
++import com.monika.payflow.wallet.service.WalletTransferResult;
++import com.monika.payflow.wallet.service.WalletTransferService;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class PaymentServiceTest {
++
++    @Mock
++    private PaymentRepository paymentRepository;
++
++    @Mock
++    private WalletTransferService walletTransferService;
++
++    @Mock
++    private TransactionRecorder transactionRecorder;
++
++    @InjectMocks
++    private PaymentService paymentService;
++
++    @Test
++    void transferCreatesPaymentAndTwoTransferLedgerEntries() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, UUID.randomUUID(), "70.00");
++        Wallet receiverWallet = wallet(receiverUserId, UUID.randomUUID(), "50.00");
++        WalletBalanceChange senderChange = new WalletBalanceChange(
++                senderWallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("70.00")
++        );
++        WalletBalanceChange receiverChange = new WalletBalanceChange(
++                receiverWallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("20.00"),
++                new BigDecimal("50.00")
++        );
++        PaymentTransferRequest request = new PaymentTransferRequest(receiverUserId, new BigDecimal("30.00"), "Dinner");
++        when(walletTransferService.transferBetweenUsers(senderUserId, receiverUserId, new BigDecimal("30.00")))
++                .thenReturn(new WalletTransferResult(senderChange, receiverChange));
++        when(paymentRepository.save(org.mockito.ArgumentMatchers.any(Payment.class)))
++                .thenAnswer(invocation -> persistedPayment(invocation.getArgument(0)));
++
++        PaymentResponse response = paymentService.transfer(senderUserId, request);
++
++        ArgumentCaptor<Payment> paymentCaptor = ArgumentCaptor.forClass(Payment.class);
++        verify(paymentRepository).save(paymentCaptor.capture());
++        Payment payment = paymentCaptor.getValue();
++        assertThat(payment.senderWalletId()).isEqualTo(senderWallet.id());
++        assertThat(payment.receiverWalletId()).isEqualTo(receiverWallet.id());
++        assertThat(payment.amount()).isEqualByComparingTo("30.00");
++        assertThat(payment.currency()).isEqualTo("INR");
++        assertThat(payment.status()).isEqualTo(PaymentStatus.SUCCESS);
++        assertThat(payment.referenceNumber()).startsWith("PAY-");
++        assertThat(payment.description()).isEqualTo("Dinner");
++        verify(transactionRecorder).recordTransferOut(
++                senderWallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("70.00")
++        );
++        verify(transactionRecorder).recordTransferIn(
++                receiverWallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("20.00"),
++                new BigDecimal("50.00")
++        );
++        assertThat(response.status()).isEqualTo(PaymentStatus.SUCCESS);
++    }
++
++    @Test
++    void transferRejectsSelfTransferBeforeUpdatingWallets() {
++        UUID userId = UUID.randomUUID();
++        PaymentTransferRequest request = new PaymentTransferRequest(userId, new BigDecimal("30.00"), "Self");
++
++        assertThatThrownBy(() -> paymentService.transfer(userId, request))
++                .isInstanceOf(BadRequestException.class);
++
++        verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder);
++    }
++
++    @Test
++    void getPaymentHistoryReturnsUserPayments() {
++        UUID userId = UUID.randomUUID();
++        Payment payment = payment(UUID.randomUUID(), UUID.randomUUID());
++        when(paymentRepository.findUserPaymentsOrderByCreatedAtDesc(userId)).thenReturn(List.of(payment));
++
++        List<PaymentResponse> response = paymentService.getPaymentHistory(userId);
++
++        assertThat(response).hasSize(1);
++        assertThat(response.getFirst().id()).isEqualTo(payment.id());
++    }
++
++    @Test
++    void getPaymentRejectsPaymentOwnedByAnotherUser() {
++        UUID userId = UUID.randomUUID();
++        UUID paymentId = UUID.randomUUID();
++        when(paymentRepository.findUserPaymentById(paymentId, userId)).thenReturn(Optional.empty());
++
++        assertThatThrownBy(() -> paymentService.getPayment(userId, paymentId))
++                .isInstanceOf(ResourceNotFoundException.class);
++    }
++
++    private Payment persistedPayment(Payment payment) {
++        ReflectionTestUtils.setField(payment, "id", UUID.randomUUID());
++        ReflectionTestUtils.setField(payment, "createdAt", Instant.now());
++        return payment;
++    }
++
++    private Payment payment(UUID senderUserId, UUID receiverUserId) {
++        Payment payment = new Payment(
++                wallet(senderUserId, UUID.randomUUID(), "100.00"),
++                wallet(receiverUserId, UUID.randomUUID(), "50.00"),
++                new BigDecimal("30.00"),
++                "INR",
++                PaymentStatus.SUCCESS,
++                "PAY-" + UUID.randomUUID(),
++                "Wallet transfer"
++        );
++        return persistedPayment(payment);
++    }
++
++    private Wallet wallet(UUID userId, UUID walletId, String balance) {
++        Wallet wallet = new Wallet(user(userId), new BigDecimal(balance), "INR", WalletStatus.ACTIVE);
++        ReflectionTestUtils.setField(wallet, "id", walletId);
++        return wallet;
++    }
++
++    private User user(UUID userId) {
++        User user = new User("monika-" + userId + "@example.com", "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return user;
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java b/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java
+index 6edd3b9..38768d6 100644
+--- a/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java
++++ b/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java
+@@ -88,6 +88,50 @@ class TransactionServiceTest {
+         assertThat(transaction.description()).isEqualTo("Wallet withdrawal");
+     }
+ 
++    @Test
++    void recordTransferOutCreatesSuccessfulTransferOutTransaction() {
++        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "70.00");
++
++        transactionService.recordTransferOut(
++                wallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("70.00")
++        );
++
++        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
++        verify(transactionRepository).save(captor.capture());
++
++        Transaction transaction = captor.getValue();
++        assertThat(transaction.transactionType()).isEqualTo(TransactionType.TRANSFER_OUT);
++        assertThat(transaction.amount()).isEqualByComparingTo("30.00");
++        assertThat(transaction.balanceBefore()).isEqualByComparingTo("100.00");
++        assertThat(transaction.balanceAfter()).isEqualByComparingTo("70.00");
++        assertThat(transaction.description()).isEqualTo("Wallet transfer sent");
++    }
++
++    @Test
++    void recordTransferInCreatesSuccessfulTransferInTransaction() {
++        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "50.00");
++
++        transactionService.recordTransferIn(
++                wallet,
++                new BigDecimal("30.00"),
++                new BigDecimal("20.00"),
++                new BigDecimal("50.00")
++        );
++
++        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
++        verify(transactionRepository).save(captor.capture());
++
++        Transaction transaction = captor.getValue();
++        assertThat(transaction.transactionType()).isEqualTo(TransactionType.TRANSFER_IN);
++        assertThat(transaction.amount()).isEqualByComparingTo("30.00");
++        assertThat(transaction.balanceBefore()).isEqualByComparingTo("20.00");
++        assertThat(transaction.balanceAfter()).isEqualByComparingTo("50.00");
++        assertThat(transaction.description()).isEqualTo("Wallet transfer received");
++    }
++
+     @Test
+     void recordRejectsInvalidAmount() {
+         Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "100.00");
+diff --git a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+index 579b72d..599f946 100644
+--- a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
++++ b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
+ import org.springframework.test.util.ReflectionTestUtils;
+ 
+ import java.math.BigDecimal;
++import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
+ 
+@@ -151,6 +152,65 @@ class WalletServiceTest {
+         verifyNoInteractions(transactionRecorder);
+     }
+ 
++    @Test
++    void transferBetweenUsersDebitsSenderAndCreditsReceiverWithoutRecordingWalletLedgerEntries() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, "100.00");
++        Wallet receiverWallet = wallet(receiverUserId, "20.00");
++        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
++                .thenReturn(List.of(senderWallet, receiverWallet));
++
++        WalletTransferResult result = walletService.transferBetweenUsers(
++                senderUserId,
++                receiverUserId,
++                new BigDecimal("30.00")
++        );
++
++        assertThat(senderWallet.balance()).isEqualByComparingTo("70.00");
++        assertThat(receiverWallet.balance()).isEqualByComparingTo("50.00");
++        assertThat(result.sender().balanceBefore()).isEqualByComparingTo("100.00");
++        assertThat(result.sender().balanceAfter()).isEqualByComparingTo("70.00");
++        assertThat(result.receiver().balanceBefore()).isEqualByComparingTo("20.00");
++        assertThat(result.receiver().balanceAfter()).isEqualByComparingTo("50.00");
++        verifyNoInteractions(transactionRecorder);
++    }
++
++    @Test
++    void transferBetweenUsersRejectsInsufficientSenderBalance() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, "10.00");
++        Wallet receiverWallet = wallet(receiverUserId, "20.00");
++        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
++                .thenReturn(List.of(senderWallet, receiverWallet));
++
++        assertThatThrownBy(() -> walletService.transferBetweenUsers(
++                senderUserId,
++                receiverUserId,
++                new BigDecimal("30.00")
++        )).isInstanceOf(BadRequestException.class);
++
++        assertThat(senderWallet.balance()).isEqualByComparingTo("10.00");
++        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
++    }
++
++    @Test
++    void transferBetweenUsersRejectsMissingReceiverWallet() {
++        UUID senderUserId = UUID.randomUUID();
++        UUID receiverUserId = UUID.randomUUID();
++        Wallet senderWallet = wallet(senderUserId, "100.00");
++        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
++                .thenReturn(List.of(senderWallet));
++
++        assertThatThrownBy(() -> walletService.transferBetweenUsers(
++                senderUserId,
++                receiverUserId,
++                new BigDecimal("30.00")
++        )).isInstanceOf(ResourceNotFoundException.class);
++    }
++
+     private Wallet wallet(UUID userId, String balance) {
+         return new Wallet(user(userId), new BigDecimal(balance), "INR", WalletStatus.ACTIVE);
+     }

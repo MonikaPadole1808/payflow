@@ -89,6 +89,50 @@ class TransactionServiceTest {
     }
 
     @Test
+    void recordTransferOutCreatesSuccessfulTransferOutTransaction() {
+        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "70.00");
+
+        transactionService.recordTransferOut(
+                wallet,
+                new BigDecimal("30.00"),
+                new BigDecimal("100.00"),
+                new BigDecimal("70.00")
+        );
+
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+
+        Transaction transaction = captor.getValue();
+        assertThat(transaction.transactionType()).isEqualTo(TransactionType.TRANSFER_OUT);
+        assertThat(transaction.amount()).isEqualByComparingTo("30.00");
+        assertThat(transaction.balanceBefore()).isEqualByComparingTo("100.00");
+        assertThat(transaction.balanceAfter()).isEqualByComparingTo("70.00");
+        assertThat(transaction.description()).isEqualTo("Wallet transfer sent");
+    }
+
+    @Test
+    void recordTransferInCreatesSuccessfulTransferInTransaction() {
+        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "50.00");
+
+        transactionService.recordTransferIn(
+                wallet,
+                new BigDecimal("30.00"),
+                new BigDecimal("20.00"),
+                new BigDecimal("50.00")
+        );
+
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+
+        Transaction transaction = captor.getValue();
+        assertThat(transaction.transactionType()).isEqualTo(TransactionType.TRANSFER_IN);
+        assertThat(transaction.amount()).isEqualByComparingTo("30.00");
+        assertThat(transaction.balanceBefore()).isEqualByComparingTo("20.00");
+        assertThat(transaction.balanceAfter()).isEqualByComparingTo("50.00");
+        assertThat(transaction.description()).isEqualTo("Wallet transfer received");
+    }
+
+    @Test
     void recordRejectsInvalidAmount() {
         Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "100.00");
 

@@ -392,9 +392,142 @@ Validation
 
 # 16. Payment APIs
 
-POST /payments/transfer
+All Payment APIs require authentication.
+
+Authorization
+
+USER
+
+ADMIN
+
+---
+
+## Transfer Money
+
+POST
+
+/api/v1/payments/transfer
 
 Transfer Money
+
+Purpose
+
+Transfer money from the authenticated user's wallet to another user's wallet.
+
+Request
+
+{
+"receiverUserId": "uuid",
+"amount": 100.00,
+"description": "Wallet transfer"
+}
+
+Validation
+
+- receiverUserId is required
+- amount is required
+- amount must be greater than 0
+- amount must have up to 17 integer digits and 2 decimal places
+- description must not exceed 255 characters
+- sender and receiver must be different users
+- sender wallet balance must be sufficient
+
+Response
+
+{
+"success": true,
+"message": "Payment transfer completed successfully",
+"data": {
+"id": "uuid",
+"senderWalletId": "uuid",
+"receiverWalletId": "uuid",
+"amount": 100.00,
+"currency": "INR",
+"status": "SUCCESS",
+"referenceNumber": "PAY-uuid",
+"description": "Wallet transfer",
+"createdAt": "timestamp"
+}
+}
+
+Rules
+
+- Transfer processing is atomic.
+- A successful transfer creates one payment record.
+- A successful transfer creates one TRANSFER_OUT ledger record for the sender.
+- A successful transfer creates one TRANSFER_IN ledger record for the receiver.
+- No external payment gateway is used in Version 1.
+
+---
+
+## Payment History
+
+GET
+
+/api/v1/payments
+
+Purpose
+
+Return payments where the authenticated user is the sender or receiver.
+
+Response
+
+{
+"success": true,
+"message": "Payments retrieved successfully",
+"data": [
+{
+"id": "uuid",
+"senderWalletId": "uuid",
+"receiverWalletId": "uuid",
+"amount": 100.00,
+"currency": "INR",
+"status": "SUCCESS",
+"referenceNumber": "PAY-uuid",
+"description": "Wallet transfer",
+"createdAt": "timestamp"
+}
+]
+}
+
+Rules
+
+- Payments are returned newest first.
+- Users can view only payments where they are the sender or receiver.
+
+---
+
+## Payment Details
+
+GET
+
+/api/v1/payments/{id}
+
+Purpose
+
+Return one payment owned by the authenticated user.
+
+Response
+
+{
+"success": true,
+"message": "Payment retrieved successfully",
+"data": {
+"id": "uuid",
+"senderWalletId": "uuid",
+"receiverWalletId": "uuid",
+"amount": 100.00,
+"currency": "INR",
+"status": "SUCCESS",
+"referenceNumber": "PAY-uuid",
+"description": "Wallet transfer",
+"createdAt": "timestamp"
+}
+}
+
+Rules
+
+- Users can view only payments where they are the sender or receiver.
 
 ---
 
@@ -448,6 +581,7 @@ Rules
 
 - Transactions are returned newest first.
 - Users can view only their own transactions.
+- Version 1 supports DEPOSIT, WITHDRAW, TRANSFER_OUT, and TRANSFER_IN transaction types.
 
 ---
 

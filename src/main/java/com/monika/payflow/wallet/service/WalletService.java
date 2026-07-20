@@ -14,10 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
-public class WalletService implements WalletProvisioningService {
+public class WalletService implements WalletProvisioningService, WalletTransferService {
 
     private static final BigDecimal ZERO_BALANCE = BigDecimal.ZERO.setScale(2);
     private static final String DEFAULT_CURRENCY = "INR";
@@ -83,6 +86,20 @@ public class WalletService implements WalletProvisioningService {
         return toResponse(wallet);
     }
 
+    @Override
+    @Transactional
+    public WalletTransferResult transferBetweenUsers(UUID senderUserId, UUID receiverUserId, BigDecimal amount) {
+        BigDecimal normalizedAmount = normalizeAmount(amount);
+        Map<UUID, Wallet> walletsByUserId = findWalletsForUpdate(senderUserId, receiverUserId);
+        Wallet senderWallet = walletsByUserId.get(senderUserId);
+        Wallet receiverWallet = walletsByUserId.get(receiverUserId);
+
+        WalletBalanceChange senderChange = debit(senderWallet, normalizedAmount);
+        WalletBalanceChange receiverChange = credit(receiverWallet, normalizedAmount);
+
+        return new WalletTransferResult(senderChange, receiverChange);
+    }
+
     private Wallet findWallet(UUID userId) {
         return walletRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -97,6 +114,43 @@ public class WalletService implements WalletProvisioningService {
                         ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
                         ErrorCode.WALLET_NOT_FOUND
                 ));
+    }
+
+    private Map<UUID, Wallet> findWalletsForUpdate(UUID senderUserId, UUID receiverUserId) {
+        List<Wallet> wallets = walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId));
+        Map<UUID, Wallet> walletsByUserId = wallets.stream()
+                .collect(Collectors.toMap(Wallet::userId, wallet -> wallet));
+
+        if (!walletsByUserId.containsKey(senderUserId) || !walletsByUserId.containsKey(receiverUserId)) {
+            throw new ResourceNotFoundException(
+                    ErrorCode.WALLET_NOT_FOUND.defaultMessage(),
+                    ErrorCode.WALLET_NOT_FOUND
+            );
+        }
+
+        return walletsByUserId;
+    }
+
+    private WalletBalanceChange debit(Wallet wallet, BigDecimal amount) {
+        BigDecimal balanceBefore = wallet.balance();
+
+        if (balanceBefore.compareTo(amount) < 0) {
+            throw new BadRequestException(
+                    ErrorCode.INSUFFICIENT_WALLET_BALANCE.defaultMessage(),
+                    ErrorCode.INSUFFICIENT_WALLET_BALANCE
+            );
+        }
+
+        BigDecimal balanceAfter = balanceBefore.subtract(amount);
+        wallet.updateBalance(balanceAfter);
+        return new WalletBalanceChange(wallet, amount, balanceBefore, balanceAfter);
+    }
+
+    private WalletBalanceChange credit(Wallet wallet, BigDecimal amount) {
+        BigDecimal balanceBefore = wallet.balance();
+        BigDecimal balanceAfter = balanceBefore.add(amount);
+        wallet.updateBalance(balanceAfter);
+        return new WalletBalanceChange(wallet, amount, balanceBefore, balanceAfter);
     }
 
     private BigDecimal normalizeAmount(BigDecimal amount) {

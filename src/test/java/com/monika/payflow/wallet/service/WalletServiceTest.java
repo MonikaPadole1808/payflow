@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -149,6 +150,65 @@ class WalletServiceTest {
 
         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
         verifyNoInteractions(transactionRecorder);
+    }
+
+    @Test
+    void transferBetweenUsersDebitsSenderAndCreditsReceiverWithoutRecordingWalletLedgerEntries() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        Wallet senderWallet = wallet(senderUserId, "100.00");
+        Wallet receiverWallet = wallet(receiverUserId, "20.00");
+        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
+                .thenReturn(List.of(senderWallet, receiverWallet));
+
+        WalletTransferResult result = walletService.transferBetweenUsers(
+                senderUserId,
+                receiverUserId,
+                new BigDecimal("30.00")
+        );
+
+        assertThat(senderWallet.balance()).isEqualByComparingTo("70.00");
+        assertThat(receiverWallet.balance()).isEqualByComparingTo("50.00");
+        assertThat(result.sender().balanceBefore()).isEqualByComparingTo("100.00");
+        assertThat(result.sender().balanceAfter()).isEqualByComparingTo("70.00");
+        assertThat(result.receiver().balanceBefore()).isEqualByComparingTo("20.00");
+        assertThat(result.receiver().balanceAfter()).isEqualByComparingTo("50.00");
+        verifyNoInteractions(transactionRecorder);
+    }
+
+    @Test
+    void transferBetweenUsersRejectsInsufficientSenderBalance() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        Wallet senderWallet = wallet(senderUserId, "10.00");
+        Wallet receiverWallet = wallet(receiverUserId, "20.00");
+        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
+                .thenReturn(List.of(senderWallet, receiverWallet));
+
+        assertThatThrownBy(() -> walletService.transferBetweenUsers(
+                senderUserId,
+                receiverUserId,
+                new BigDecimal("30.00")
+        )).isInstanceOf(BadRequestException.class);
+
+        assertThat(senderWallet.balance()).isEqualByComparingTo("10.00");
+        assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
+    }
+
+    @Test
+    void transferBetweenUsersRejectsMissingReceiverWallet() {
+        UUID senderUserId = UUID.randomUUID();
+        UUID receiverUserId = UUID.randomUUID();
+        Wallet senderWallet = wallet(senderUserId, "100.00");
+        when(walletRepository.findByUserIdInForUpdate(List.of(senderUserId, receiverUserId)))
+                .thenReturn(List.of(senderWallet));
+
+        assertThatThrownBy(() -> walletService.transferBetweenUsers(
+                senderUserId,
+                receiverUserId,
+                new BigDecimal("30.00")
+        )).isInstanceOf(ResourceNotFoundException.class);
     }
 
     private Wallet wallet(UUID userId, String balance) {

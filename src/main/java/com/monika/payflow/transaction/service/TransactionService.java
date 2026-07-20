@@ -22,6 +22,8 @@ public class TransactionService implements TransactionRecorder {
     private static final String REFERENCE_PREFIX = "TXN-";
     private static final String DEPOSIT_DESCRIPTION = "Wallet deposit";
     private static final String WITHDRAWAL_DESCRIPTION = "Wallet withdrawal";
+    private static final String TRANSFER_OUT_DESCRIPTION = "Wallet transfer sent";
+    private static final String TRANSFER_IN_DESCRIPTION = "Wallet transfer received";
 
     private final TransactionRepository transactionRepository;
 
@@ -37,6 +39,16 @@ public class TransactionService implements TransactionRecorder {
     @Override
     public void recordWithdrawal(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
         record(wallet, TransactionType.WITHDRAW, amount, balanceBefore, balanceAfter, WITHDRAWAL_DESCRIPTION);
+    }
+
+    @Override
+    public void recordTransferOut(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
+        record(wallet, TransactionType.TRANSFER_OUT, amount, balanceBefore, balanceAfter, TRANSFER_OUT_DESCRIPTION);
+    }
+
+    @Override
+    public void recordTransferIn(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
+        record(wallet, TransactionType.TRANSFER_IN, amount, balanceBefore, balanceAfter, TRANSFER_IN_DESCRIPTION);
     }
 
     @Transactional(readOnly = true)

@@ -530,7 +530,7 @@ Columns
 |--------|------|------|
 | id | UUID | Primary key |
 | wallet_id | UUID | Required, references wallets(id) |
-| transaction_type | VARCHAR(30) | Required, DEPOSIT or WITHDRAW |
+| transaction_type | VARCHAR(30) | Required, DEPOSIT, WITHDRAW, TRANSFER_OUT, or TRANSFER_IN |
 | status | VARCHAR(30) | Required, SUCCESS |
 | amount | NUMERIC(19,2) | Required, must be positive |
 | balance_before | NUMERIC(19,2) | Required, cannot be negative |
@@ -565,6 +565,63 @@ Rules
 - Transactions are never updated.
 - Transactions are never deleted.
 - Deposit and withdraw operations create exactly one SUCCESS transaction after a successful wallet balance change.
+- Wallet-to-wallet transfers create one TRANSFER_OUT transaction for the sender and one TRANSFER_IN transaction for the receiver.
+
+---
+
+## payments
+
+Owner Module
+
+payment
+
+Purpose
+
+Stores successful wallet-to-wallet payment records.
+
+Relationship
+
+One sender wallet and one receiver wallet are linked to each payment.
+
+Columns
+
+| Column | Type | Rule |
+|--------|------|------|
+| id | UUID | Primary key |
+| sender_wallet_id | UUID | Required, references wallets(id) |
+| receiver_wallet_id | UUID | Required, references wallets(id) |
+| amount | NUMERIC(19,2) | Required, must be positive |
+| currency | VARCHAR(3) | Required |
+| status | VARCHAR(30) | Required, SUCCESS |
+| reference_number | VARCHAR(64) | Required, unique |
+| description | VARCHAR(255) | Required |
+| created_at | TIMESTAMPTZ | Required |
+
+Constraints
+
+- `fk_payments_sender_wallet`
+- `fk_payments_receiver_wallet`
+- `uk_payments_reference_number`
+- `ck_payments_distinct_wallets`
+- `ck_payments_amount_positive`
+- `ck_payments_currency_length`
+- `ck_payments_status`
+
+Indexes
+
+- `idx_payments_sender_wallet_created_at`
+- `idx_payments_receiver_wallet_created_at`
+
+Migration
+
+- `V6__create_payments_table.sql`
+
+Rules
+
+- Payment records are created only for successful wallet-to-wallet transfers.
+- A user cannot transfer money to themselves.
+- Every successful payment creates exactly one payment record.
+- Every successful payment creates exactly two transaction ledger records.
 
 ---
 

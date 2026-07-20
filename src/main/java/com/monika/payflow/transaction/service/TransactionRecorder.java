@@ -9,4 +9,8 @@ public interface TransactionRecorder {
     void recordDeposit(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
 
     void recordWithdrawal(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
+
+    void recordTransferOut(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
+
+    void recordTransferIn(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
 }
