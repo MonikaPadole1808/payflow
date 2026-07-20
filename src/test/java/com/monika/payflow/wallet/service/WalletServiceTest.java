@@ -3,6 +3,7 @@ package com.monika.payflow.wallet.service;
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.transaction.service.TransactionRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.entity.UserRole;
 import com.monika.payflow.user.entity.UserStatus;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +35,9 @@ class WalletServiceTest {
 
     @Mock
     private WalletRepository walletRepository;
+
+    @Mock
+    private TransactionRecorder transactionRecorder;
 
     @InjectMocks
     private WalletService walletService;
@@ -94,6 +99,12 @@ class WalletServiceTest {
 
         assertThat(response.balance()).isEqualByComparingTo("125.25");
         assertThat(wallet.balance()).isEqualByComparingTo("125.25");
+        verify(transactionRecorder).recordDeposit(
+                wallet,
+                new BigDecimal("25.25"),
+                new BigDecimal("100.00"),
+                new BigDecimal("125.25")
+        );
     }
 
     @Test
@@ -106,6 +117,12 @@ class WalletServiceTest {
 
         assertThat(response.balance()).isEqualByComparingTo("60.00");
         assertThat(wallet.balance()).isEqualByComparingTo("60.00");
+        verify(transactionRecorder).recordWithdrawal(
+                wallet,
+                new BigDecimal("40.00"),
+                new BigDecimal("100.00"),
+                new BigDecimal("60.00")
+        );
     }
 
     @Test
@@ -118,6 +135,7 @@ class WalletServiceTest {
                 .isInstanceOf(BadRequestException.class);
 
         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
     }
 
     @Test
@@ -130,6 +148,7 @@ class WalletServiceTest {
                 .isInstanceOf(BadRequestException.class);
 
         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+        verifyNoInteractions(transactionRecorder);
     }
 
     private Wallet wallet(UUID userId, String balance) {

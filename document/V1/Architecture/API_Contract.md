@@ -400,13 +400,94 @@ Transfer Money
 
 # 17. Transaction APIs
 
-GET /transactions
+All Transaction APIs require authentication.
+
+Authorization
+
+USER
+
+ADMIN
+
+---
+
+## Transaction History
+
+GET
+
+/api/v1/transactions
 
 Transaction History
 
-GET /transactions/{id}
+Purpose
+
+Return the authenticated user's transaction history.
+
+Response
+
+{
+"success": true,
+"message": "Transactions retrieved successfully",
+"data": [
+{
+"id": "uuid",
+"walletId": "uuid",
+"transactionType": "DEPOSIT",
+"status": "SUCCESS",
+"amount": 100.00,
+"balanceBefore": 0.00,
+"balanceAfter": 100.00,
+"currency": "INR",
+"referenceNumber": "TXN-uuid",
+"description": "Wallet deposit",
+"createdAt": "timestamp"
+}
+]
+}
+
+Rules
+
+- Transactions are returned newest first.
+- Users can view only their own transactions.
+
+---
+
+## Transaction Details
+
+GET
+
+/api/v1/transactions/{id}
 
 Transaction Details
+
+Purpose
+
+Return one transaction owned by the authenticated user.
+
+Response
+
+{
+"success": true,
+"message": "Transaction retrieved successfully",
+"data": {
+"id": "uuid",
+"walletId": "uuid",
+"transactionType": "WITHDRAW",
+"status": "SUCCESS",
+"amount": 50.00,
+"balanceBefore": 100.00,
+"balanceAfter": 50.00,
+"currency": "INR",
+"referenceNumber": "TXN-uuid",
+"description": "Wallet withdrawal",
+"createdAt": "timestamp"
+}
+}
+
+Rules
+
+- Users can view only their own transactions.
+- Transactions are created internally only.
+- No public create transaction API exists in Version 1.
 
 ---
 

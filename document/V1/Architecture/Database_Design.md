@@ -510,6 +510,64 @@ Migration
 
 ---
 
+## transactions
+
+Owner Module
+
+transaction
+
+Purpose
+
+Stores immutable ledger records for successful wallet balance movements.
+
+Relationship
+
+One wallet has many transactions.
+
+Columns
+
+| Column | Type | Rule |
+|--------|------|------|
+| id | UUID | Primary key |
+| wallet_id | UUID | Required, references wallets(id) |
+| transaction_type | VARCHAR(30) | Required, DEPOSIT or WITHDRAW |
+| status | VARCHAR(30) | Required, SUCCESS |
+| amount | NUMERIC(19,2) | Required, must be positive |
+| balance_before | NUMERIC(19,2) | Required, cannot be negative |
+| balance_after | NUMERIC(19,2) | Required, cannot be negative |
+| currency | VARCHAR(3) | Required |
+| reference_number | VARCHAR(64) | Required, unique |
+| description | VARCHAR(255) | Required |
+| created_at | TIMESTAMPTZ | Required |
+
+Constraints
+
+- `fk_transactions_wallet`
+- `uk_transactions_reference_number`
+- `ck_transactions_type`
+- `ck_transactions_status`
+- `ck_transactions_amount_positive`
+- `ck_transactions_balance_before_non_negative`
+- `ck_transactions_balance_after_non_negative`
+- `ck_transactions_currency_length`
+
+Indexes
+
+- `idx_transactions_wallet_created_at`
+
+Migration
+
+- `V5__create_transactions_table.sql`
+
+Rules
+
+- Transaction records are immutable.
+- Transactions are never updated.
+- Transactions are never deleted.
+- Deposit and withdraw operations create exactly one SUCCESS transaction after a successful wallet balance change.
+
+---
+
 # 21. Approval
 
 Status

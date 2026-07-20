@@ -1,6 +1,6 @@
 # Project Progress
 
-> **Last Updated:** 18-Jul-2026
+> **Last Updated:** 20-Jul-2026
 
 ---
 
@@ -43,18 +43,22 @@ Sprint 1
 - [x] Automatic wallet creation after registration implemented
 - [x] Wallet Flyway migration added
 - [x] Wallet tests added
+- [x] Transaction Ledger module implemented
+- [x] Transaction Flyway migration added
+- [x] Deposit and withdraw ledger recording implemented
+- [x] Transaction tests added
 
 ---
 
 # In Progress
 
-Wallet module independent review
+Transaction Ledger module independent review
 
 ---
 
 # Next Task
 
-Independent architecture and code review for Wallet module.
+Independent architecture and code review for Transaction Ledger module.
 
 ---
 
@@ -153,7 +157,7 @@ Wallet
 
 Transaction
 
-Pending
+Completed
 
 Payment
 
@@ -171,21 +175,42 @@ Pending
 
 ## Next Milestone
 
-Milestone 04
+Milestone 05
 
-Transaction (Ledger)
+Payment Processing
 
 Objectives
+
+- Wallet-to-Wallet Transfer
+- Payment Validation
+- Payment Execution
+- Payment Transaction Integration
+
+Status
+
+Pending
+
+---
+
+### Milestone 04
+
+Completed: Transaction Ledger
+
+Implemented:
 
 - Transaction Entity
 - Transaction Repository
 - Transaction Service
-- Transaction APIs
+- Transaction Controller
+- Transaction DTOs
+- Flyway Migration V5
 - Deposit Transaction Recording
 - Withdraw Transaction Recording
 - Transaction History
-- Flyway Migration
+- Transaction Details
+- Transaction Tests
 
-Status
+Verification
 
-Ready to Begin
+- All tests passed
+- Application startup verified

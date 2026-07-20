@@ -1,0 +1,1476 @@
+﻿diff --git a/document/Project_Progress.md b/document/Project_Progress.md
+index 29e4088..fd0b453 100644
+--- a/document/Project_Progress.md
++++ b/document/Project_Progress.md
+@@ -1,6 +1,6 @@
+ # Project Progress
+ 
+-> **Last Updated:** 18-Jul-2026
++> **Last Updated:** 20-Jul-2026
+ 
+ ---
+ 
+@@ -43,18 +43,22 @@ Sprint 1
+ - [x] Automatic wallet creation after registration implemented
+ - [x] Wallet Flyway migration added
+ - [x] Wallet tests added
++- [x] Transaction Ledger module implemented
++- [x] Transaction Flyway migration added
++- [x] Deposit and withdraw ledger recording implemented
++- [x] Transaction tests added
+ 
+ ---
+ 
+ # In Progress
+ 
+-Wallet module independent review
++Transaction Ledger module independent review
+ 
+ ---
+ 
+ # Next Task
+ 
+-Independent architecture and code review for Wallet module.
++Independent architecture and code review for Transaction Ledger module.
+ 
+ ---
+ 
+@@ -153,7 +157,7 @@ Wallet
+ 
+ Transaction
+ 
+-Pending
++Completed
+ 
+ Payment
+ 
+@@ -171,21 +175,42 @@ Pending
+ 
+ ## Next Milestone
+ 
+-Milestone 04
++Milestone 05
+ 
+-Transaction (Ledger)
++Payment Processing
+ 
+ Objectives
+ 
++- Wallet-to-Wallet Transfer
++- Payment Validation
++- Payment Execution
++- Payment Transaction Integration
++
++Status
++
++Pending
++
++---
++
++### Milestone 04
++
++Completed: Transaction Ledger
++
++Implemented:
++
+ - Transaction Entity
+ - Transaction Repository
+ - Transaction Service
+-- Transaction APIs
++- Transaction Controller
++- Transaction DTOs
++- Flyway Migration V5
+ - Deposit Transaction Recording
+ - Withdraw Transaction Recording
+ - Transaction History
+-- Flyway Migration
++- Transaction Details
++- Transaction Tests
+ 
+-Status
++Verification
+ 
+-Ready to Begin
+\ No newline at end of file
++- All tests passed
++- Application startup verified
+diff --git a/document/V1/Architecture/API_Contract.md b/document/V1/Architecture/API_Contract.md
+index 4fde90c..714f43d 100644
+--- a/document/V1/Architecture/API_Contract.md
++++ b/document/V1/Architecture/API_Contract.md
+@@ -400,14 +400,95 @@ Transfer Money
+ 
+ # 17. Transaction APIs
+ 
+-GET /transactions
++All Transaction APIs require authentication.
++
++Authorization
++
++USER
++
++ADMIN
++
++---
++
++## Transaction History
++
++GET
++
++/api/v1/transactions
+ 
+ Transaction History
+ 
+-GET /transactions/{id}
++Purpose
++
++Return the authenticated user's transaction history.
++
++Response
++
++{
++"success": true,
++"message": "Transactions retrieved successfully",
++"data": [
++{
++"id": "uuid",
++"walletId": "uuid",
++"transactionType": "DEPOSIT",
++"status": "SUCCESS",
++"amount": 100.00,
++"balanceBefore": 0.00,
++"balanceAfter": 100.00,
++"currency": "INR",
++"referenceNumber": "TXN-uuid",
++"description": "Wallet deposit",
++"createdAt": "timestamp"
++}
++]
++}
++
++Rules
++
++- Transactions are returned newest first.
++- Users can view only their own transactions.
++
++---
++
++## Transaction Details
++
++GET
++
++/api/v1/transactions/{id}
+ 
+ Transaction Details
+ 
++Purpose
++
++Return one transaction owned by the authenticated user.
++
++Response
++
++{
++"success": true,
++"message": "Transaction retrieved successfully",
++"data": {
++"id": "uuid",
++"walletId": "uuid",
++"transactionType": "WITHDRAW",
++"status": "SUCCESS",
++"amount": 50.00,
++"balanceBefore": 100.00,
++"balanceAfter": 50.00,
++"currency": "INR",
++"referenceNumber": "TXN-uuid",
++"description": "Wallet withdrawal",
++"createdAt": "timestamp"
++}
++}
++
++Rules
++
++- Users can view only their own transactions.
++- Transactions are created internally only.
++- No public create transaction API exists in Version 1.
++
+ ---
+ 
+ # 18. Notification APIs
+diff --git a/document/V1/Architecture/Database_Design.md b/document/V1/Architecture/Database_Design.md
+index ca02270..4d7ebc3 100644
+--- a/document/V1/Architecture/Database_Design.md
++++ b/document/V1/Architecture/Database_Design.md
+@@ -510,6 +510,64 @@ Migration
+ 
+ ---
+ 
++## transactions
++
++Owner Module
++
++transaction
++
++Purpose
++
++Stores immutable ledger records for successful wallet balance movements.
++
++Relationship
++
++One wallet has many transactions.
++
++Columns
++
++| Column | Type | Rule |
++|--------|------|------|
++| id | UUID | Primary key |
++| wallet_id | UUID | Required, references wallets(id) |
++| transaction_type | VARCHAR(30) | Required, DEPOSIT or WITHDRAW |
++| status | VARCHAR(30) | Required, SUCCESS |
++| amount | NUMERIC(19,2) | Required, must be positive |
++| balance_before | NUMERIC(19,2) | Required, cannot be negative |
++| balance_after | NUMERIC(19,2) | Required, cannot be negative |
++| currency | VARCHAR(3) | Required |
++| reference_number | VARCHAR(64) | Required, unique |
++| description | VARCHAR(255) | Required |
++| created_at | TIMESTAMPTZ | Required |
++
++Constraints
++
++- `fk_transactions_wallet`
++- `uk_transactions_reference_number`
++- `ck_transactions_type`
++- `ck_transactions_status`
++- `ck_transactions_amount_positive`
++- `ck_transactions_balance_before_non_negative`
++- `ck_transactions_balance_after_non_negative`
++- `ck_transactions_currency_length`
++
++Indexes
++
++- `idx_transactions_wallet_created_at`
++
++Migration
++
++- `V5__create_transactions_table.sql`
++
++Rules
++
++- Transaction records are immutable.
++- Transactions are never updated.
++- Transactions are never deleted.
++- Deposit and withdraw operations create exactly one SUCCESS transaction after a successful wallet balance change.
++
++---
++
+ # 21. Approval
+ 
+ Status
+diff --git a/document/V1/Daily_Development/19_07_2026/04_Transaction_Ledger.md b/document/V1/Daily_Development/19_07_2026/04_Transaction_Ledger.md
+new file mode 100644
+index 0000000..ab508d7
+--- /dev/null
++++ b/document/V1/Daily_Development/19_07_2026/04_Transaction_Ledger.md
+@@ -0,0 +1,278 @@
++# Transaction Ledger Module
++
++## Milestone
++
++04 - Transaction Ledger
++
++---
++
++## Objective
++
++Implement the Transaction Ledger module.
++
++The ledger records every financial movement within the system.
++
++This module is the permanent source of truth for account activity.
++
++The Payment module will use this infrastructure in future milestones.
++
++---
++
++## Prerequisites
++
++Completed
++
++- Project Foundation
++- Authentication Foundation
++- Wallet Module
++
++---
++
++## Scope
++
++Implement only Transaction Ledger functionality.
++
++Included
++
++- Transaction Entity
++- Transaction Repository
++- Transaction Service
++- Transaction Controller
++- Transaction DTOs
++- Flyway Migration
++- Transaction Tests
++
++---
++
++## Functional Requirements
++
++### Record Deposit
++
++Every successful deposit must create one transaction record.
++
++---
++
++### Record Withdrawal
++
++Every successful withdrawal must create one transaction record.
++
++---
++
++### Transaction History
++
++Authenticated users can retrieve their own transaction history.
++
++Transactions must be ordered from newest to oldest.
++
++---
++
++### Transaction Details
++
++Authenticated users can retrieve one transaction by ID.
++
++Users may access only their own transactions.
++
++---
++
++## Transaction Types
++
++Version 1 supports
++
++- DEPOSIT
++- WITHDRAW
++
++Future versions will add
++
++- TRANSFER_IN
++- TRANSFER_OUT
++- PAYMENT
++- REFUND
++- REVERSAL
++
++---
++
++## Transaction Status
++
++Version 1
++
++- SUCCESS
++
++Future
++
++- PENDING
++- FAILED
++- CANCELLED
++- REVERSED
++
++---
++
++## Database
++
++Create
++
++transactions
++
++Relationship
++
++User (1)
++
++↓
++
++Wallet (1)
++
++↓
++
++Many Transactions
++
++Each transaction belongs to exactly one wallet.
++
++---
++
++## Fields
++
++Minimum required
++
++- id
++- wallet_id
++- transaction_type
++- status
++- amount
++- balance_before
++- balance_after
++- currency
++- reference_number
++- description
++- created_at
++
++Additional fields may be added only if required.
++
++---
++
++## Business Rules
++
++Every successful balance change creates exactly one transaction.
++
++Transaction records are immutable.
++
++Transactions are never updated.
++
++Transactions are never deleted.
++
++Historical data must remain intact.
++
++---
++
++## API Endpoints
++
++GET
++
++/api/v1/transactions
++
++Return authenticated user's transaction history.
++
++---
++
++GET
++
++/api/v1/transactions/{id}
++
++Return transaction details.
++
++---
++
++No transaction creation endpoint.
++
++Transactions are created internally by business services.
++
++---
++
++## Validation
++
++Users may access only their own transactions.
++
++Amounts must always be positive.
++
++Balance snapshots must match the wallet state at the time of the operation.
++
++---
++
++## Integration
++
++Deposit
++
++↓
++
++Wallet Updated
++
++↓
++
++Transaction Recorded
++
++Withdraw
++
++↓
++
++Wallet Updated
++
++↓
++
++Transaction Recorded
++
++Payment integration will be implemented later.
++
++---
++
++## Constraints
++
++Do NOT implement
++
++- Wallet-to-Wallet Transfer
++- Payment Processing
++- Refund
++- Notifications
++- Scheduler
++- Admin Transaction APIs
++
++---
++
++## Deliverables
++
++- Transaction Entity
++- Transaction Repository
++- Transaction Service
++- Transaction Controller
++- Transaction DTOs
++- Flyway Migration
++- Unit Tests
++- Integration Tests
++- Documentation Updates
++
++---
++
++## Documentation Updates
++
++Update
++
++- API_Contract.md
++- Database_Design.md
++- Project_Progress.md
++
++if implementation introduces new information.
++
++---
++
++## Success Criteria
++
++Application builds successfully.
++
++All tests pass.
++
++Deposit creates a transaction.
++
++Withdraw creates a transaction.
++
++Transaction history works.
++
++Architecture remains unchanged.
++
++Git patch generated for review.
+\ No newline at end of file
+diff --git a/src/main/java/com/monika/payflow/common/error/ErrorCode.java b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+index 95f022e..1435755 100644
+--- a/src/main/java/com/monika/payflow/common/error/ErrorCode.java
++++ b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+@@ -15,6 +15,7 @@ public enum ErrorCode {
+     WALLET_NOT_FOUND("PF-404-002", "Wallet was not found", HttpStatus.NOT_FOUND),
+     WALLET_ALREADY_EXISTS("PF-409-002", "Wallet already exists for this user", HttpStatus.CONFLICT),
+     INSUFFICIENT_WALLET_BALANCE("PF-400-004", "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
++    TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
+     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
+ 
+     private final String code;
+diff --git a/src/main/java/com/monika/payflow/transaction/controller/TransactionController.java b/src/main/java/com/monika/payflow/transaction/controller/TransactionController.java
+new file mode 100644
+index 0000000..46936ea
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/controller/TransactionController.java
+@@ -0,0 +1,44 @@
++package com.monika.payflow.transaction.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.common.constants.AppConstants;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.transaction.service.TransactionService;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.List;
++import java.util.UUID;
++
++@RestController
++@RequestMapping(AppConstants.API_BASE_PATH + "/transactions")
++public class TransactionController {
++
++    private final TransactionService transactionService;
++
++    public TransactionController(TransactionService transactionService) {
++        this.transactionService = transactionService;
++    }
++
++    @GetMapping
++    public ResponseEntity<ApiResponse<List<TransactionResponse>>> getTransactionHistory(
++            @AuthenticationPrincipal AuthUserDetails currentUser
++    ) {
++        List<TransactionResponse> response = transactionService.getTransactionHistory(currentUser.id());
++        return ResponseEntity.ok(ApiResponse.success("Transactions retrieved successfully", response));
++    }
++
++    @GetMapping("/{id}")
++    public ResponseEntity<ApiResponse<TransactionResponse>> getTransaction(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @PathVariable UUID id
++    ) {
++        TransactionResponse response = transactionService.getTransaction(currentUser.id(), id);
++        return ResponseEntity.ok(ApiResponse.success("Transaction retrieved successfully", response));
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/dto/TransactionResponse.java b/src/main/java/com/monika/payflow/transaction/dto/TransactionResponse.java
+new file mode 100644
+index 0000000..7a74579
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/dto/TransactionResponse.java
+@@ -0,0 +1,23 @@
++package com.monika.payflow.transaction.dto;
++
++import com.monika.payflow.transaction.entity.TransactionStatus;
++import com.monika.payflow.transaction.entity.TransactionType;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++public record TransactionResponse(
++        UUID id,
++        UUID walletId,
++        TransactionType transactionType,
++        TransactionStatus status,
++        BigDecimal amount,
++        BigDecimal balanceBefore,
++        BigDecimal balanceAfter,
++        String currency,
++        String referenceNumber,
++        String description,
++        Instant createdAt
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/entity/Transaction.java b/src/main/java/com/monika/payflow/transaction/entity/Transaction.java
+new file mode 100644
+index 0000000..1b79125
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/entity/Transaction.java
+@@ -0,0 +1,138 @@
++package com.monika.payflow.transaction.entity;
++
++import com.monika.payflow.wallet.entity.Wallet;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.EnumType;
++import jakarta.persistence.Enumerated;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "transactions")
++public class Transaction {
++
++    @Id
++    @GeneratedValue
++    private UUID id;
++
++    @ManyToOne(fetch = FetchType.LAZY, optional = false)
++    @JoinColumn(name = "wallet_id", nullable = false)
++    private Wallet wallet;
++
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, name = "transaction_type", length = 30)
++    private TransactionType transactionType;
++
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, length = 30)
++    private TransactionStatus status;
++
++    @Column(nullable = false, precision = 19, scale = 2)
++    private BigDecimal amount;
++
++    @Column(nullable = false, name = "balance_before", precision = 19, scale = 2)
++    private BigDecimal balanceBefore;
++
++    @Column(nullable = false, name = "balance_after", precision = 19, scale = 2)
++    private BigDecimal balanceAfter;
++
++    @Column(nullable = false, length = 3)
++    private String currency;
++
++    @Column(nullable = false, name = "reference_number", length = 64, unique = true)
++    private String referenceNumber;
++
++    @Column(nullable = false, length = 255)
++    private String description;
++
++    @Column(nullable = false, name = "created_at", updatable = false)
++    private Instant createdAt;
++
++    protected Transaction() {
++    }
++
++    public Transaction(
++            Wallet wallet,
++            TransactionType transactionType,
++            TransactionStatus status,
++            BigDecimal amount,
++            BigDecimal balanceBefore,
++            BigDecimal balanceAfter,
++            String currency,
++            String referenceNumber,
++            String description
++    ) {
++        this.wallet = wallet;
++        this.transactionType = transactionType;
++        this.status = status;
++        this.amount = amount;
++        this.balanceBefore = balanceBefore;
++        this.balanceAfter = balanceAfter;
++        this.currency = currency;
++        this.referenceNumber = referenceNumber;
++        this.description = description;
++    }
++
++    @PrePersist
++    void prePersist() {
++        this.createdAt = Instant.now();
++    }
++
++    public UUID id() {
++        return id;
++    }
++
++    public UUID walletId() {
++        return wallet.id();
++    }
++
++    public UUID userId() {
++        return wallet.userId();
++    }
++
++    public TransactionType transactionType() {
++        return transactionType;
++    }
++
++    public TransactionStatus status() {
++        return status;
++    }
++
++    public BigDecimal amount() {
++        return amount;
++    }
++
++    public BigDecimal balanceBefore() {
++        return balanceBefore;
++    }
++
++    public BigDecimal balanceAfter() {
++        return balanceAfter;
++    }
++
++    public String currency() {
++        return currency;
++    }
++
++    public String referenceNumber() {
++        return referenceNumber;
++    }
++
++    public String description() {
++        return description;
++    }
++
++    public Instant createdAt() {
++        return createdAt;
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/entity/TransactionStatus.java b/src/main/java/com/monika/payflow/transaction/entity/TransactionStatus.java
+new file mode 100644
+index 0000000..57e7e56
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/entity/TransactionStatus.java
+@@ -0,0 +1,5 @@
++package com.monika.payflow.transaction.entity;
++
++public enum TransactionStatus {
++    SUCCESS
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java b/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java
+new file mode 100644
+index 0000000..ac965a4
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/entity/TransactionType.java
+@@ -0,0 +1,6 @@
++package com.monika.payflow.transaction.entity;
++
++public enum TransactionType {
++    DEPOSIT,
++    WITHDRAW
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java b/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java
+new file mode 100644
+index 0000000..8697fce
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/repository/TransactionRepository.java
+@@ -0,0 +1,15 @@
++package com.monika.payflow.transaction.repository;
++
++import com.monika.payflow.transaction.entity.Transaction;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
++
++    List<Transaction> findByWallet_User_IdOrderByCreatedAtDesc(UUID userId);
++
++    Optional<Transaction> findByIdAndWallet_User_Id(UUID id, UUID userId);
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java b/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java
+new file mode 100644
+index 0000000..3a9414f
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/service/TransactionRecorder.java
+@@ -0,0 +1,12 @@
++package com.monika.payflow.transaction.service;
++
++import com.monika.payflow.wallet.entity.Wallet;
++
++import java.math.BigDecimal;
++
++public interface TransactionRecorder {
++
++    void recordDeposit(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
++
++    void recordWithdrawal(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter);
++}
+diff --git a/src/main/java/com/monika/payflow/transaction/service/TransactionService.java b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+new file mode 100644
+index 0000000..052fff6
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/transaction/service/TransactionService.java
+@@ -0,0 +1,112 @@
++package com.monika.payflow.transaction.service;
++
++import com.monika.payflow.common.error.ErrorCode;
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.transaction.entity.Transaction;
++import com.monika.payflow.transaction.entity.TransactionStatus;
++import com.monika.payflow.transaction.entity.TransactionType;
++import com.monika.payflow.transaction.repository.TransactionRepository;
++import com.monika.payflow.wallet.entity.Wallet;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.UUID;
++
++@Service
++public class TransactionService implements TransactionRecorder {
++
++    private static final String REFERENCE_PREFIX = "TXN-";
++    private static final String DEPOSIT_DESCRIPTION = "Wallet deposit";
++    private static final String WITHDRAWAL_DESCRIPTION = "Wallet withdrawal";
++
++    private final TransactionRepository transactionRepository;
++
++    public TransactionService(TransactionRepository transactionRepository) {
++        this.transactionRepository = transactionRepository;
++    }
++
++    @Override
++    public void recordDeposit(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
++        record(wallet, TransactionType.DEPOSIT, amount, balanceBefore, balanceAfter, DEPOSIT_DESCRIPTION);
++    }
++
++    @Override
++    public void recordWithdrawal(Wallet wallet, BigDecimal amount, BigDecimal balanceBefore, BigDecimal balanceAfter) {
++        record(wallet, TransactionType.WITHDRAW, amount, balanceBefore, balanceAfter, WITHDRAWAL_DESCRIPTION);
++    }
++
++    @Transactional(readOnly = true)
++    public List<TransactionResponse> getTransactionHistory(UUID userId) {
++        return transactionRepository.findByWallet_User_IdOrderByCreatedAtDesc(userId)
++                .stream()
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public TransactionResponse getTransaction(UUID userId, UUID transactionId) {
++        Transaction transaction = transactionRepository.findByIdAndWallet_User_Id(transactionId, userId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.TRANSACTION_NOT_FOUND.defaultMessage(),
++                        ErrorCode.TRANSACTION_NOT_FOUND
++                ));
++
++        return toResponse(transaction);
++    }
++
++    private void record(
++            Wallet wallet,
++            TransactionType transactionType,
++            BigDecimal amount,
++            BigDecimal balanceBefore,
++            BigDecimal balanceAfter,
++            String description
++    ) {
++        BigDecimal normalizedAmount = normalizeAmount(amount);
++        Transaction transaction = new Transaction(
++                wallet,
++                transactionType,
++                TransactionStatus.SUCCESS,
++                normalizedAmount,
++                balanceBefore.setScale(2),
++                balanceAfter.setScale(2),
++                wallet.currency(),
++                generateReferenceNumber(),
++                description
++        );
++
++        transactionRepository.save(transaction);
++    }
++
++    private BigDecimal normalizeAmount(BigDecimal amount) {
++        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0 || amount.scale() > 2) {
++            throw new BadRequestException(ErrorCode.BAD_REQUEST.defaultMessage());
++        }
++
++        return amount.setScale(2);
++    }
++
++    private String generateReferenceNumber() {
++        return REFERENCE_PREFIX + UUID.randomUUID();
++    }
++
++    private TransactionResponse toResponse(Transaction transaction) {
++        return new TransactionResponse(
++                transaction.id(),
++                transaction.walletId(),
++                transaction.transactionType(),
++                transaction.status(),
++                transaction.amount(),
++                transaction.balanceBefore(),
++                transaction.balanceAfter(),
++                transaction.currency(),
++                transaction.referenceNumber(),
++                transaction.description(),
++                transaction.createdAt()
++        );
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletService.java b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+index c7fa59e..7e4eca7 100644
+--- a/src/main/java/com/monika/payflow/wallet/service/WalletService.java
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+@@ -4,6 +4,7 @@ import com.monika.payflow.common.error.ErrorCode;
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.transaction.service.TransactionRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.wallet.dto.WalletResponse;
+ import com.monika.payflow.wallet.entity.Wallet;
+@@ -22,9 +23,11 @@ public class WalletService implements WalletProvisioningService {
+     private static final String DEFAULT_CURRENCY = "INR";
+ 
+     private final WalletRepository walletRepository;
++    private final TransactionRecorder transactionRecorder;
+ 
+-    public WalletService(WalletRepository walletRepository) {
++    public WalletService(WalletRepository walletRepository, TransactionRecorder transactionRecorder) {
+         this.walletRepository = walletRepository;
++        this.transactionRecorder = transactionRecorder;
+     }
+ 
+     @Override
+@@ -50,7 +53,13 @@ public class WalletService implements WalletProvisioningService {
+     @Transactional
+     public WalletResponse deposit(UUID userId, BigDecimal amount) {
+         Wallet wallet = findWalletForUpdate(userId);
+-        wallet.updateBalance(wallet.balance().add(normalizeAmount(amount)));
++        BigDecimal normalizedAmount = normalizeAmount(amount);
++        BigDecimal balanceBefore = wallet.balance();
++        BigDecimal balanceAfter = balanceBefore.add(normalizedAmount);
++
++        wallet.updateBalance(balanceAfter);
++        transactionRecorder.recordDeposit(wallet, normalizedAmount, balanceBefore, balanceAfter);
++
+         return toResponse(wallet);
+     }
+ 
+@@ -58,15 +67,19 @@ public class WalletService implements WalletProvisioningService {
+     public WalletResponse withdraw(UUID userId, BigDecimal amount) {
+         Wallet wallet = findWalletForUpdate(userId);
+         BigDecimal normalizedAmount = normalizeAmount(amount);
++        BigDecimal balanceBefore = wallet.balance();
+ 
+-        if (wallet.balance().compareTo(normalizedAmount) < 0) {
++        if (balanceBefore.compareTo(normalizedAmount) < 0) {
+             throw new BadRequestException(
+                     ErrorCode.INSUFFICIENT_WALLET_BALANCE.defaultMessage(),
+                     ErrorCode.INSUFFICIENT_WALLET_BALANCE
+             );
+         }
+ 
+-        wallet.updateBalance(wallet.balance().subtract(normalizedAmount));
++        BigDecimal balanceAfter = balanceBefore.subtract(normalizedAmount);
++        wallet.updateBalance(balanceAfter);
++        transactionRecorder.recordWithdrawal(wallet, normalizedAmount, balanceBefore, balanceAfter);
++
+         return toResponse(wallet);
+     }
+ 
+diff --git a/src/main/resources/db/migration/V5__create_transactions_table.sql b/src/main/resources/db/migration/V5__create_transactions_table.sql
+new file mode 100644
+index 0000000..27c5cc5
+--- /dev/null
++++ b/src/main/resources/db/migration/V5__create_transactions_table.sql
+@@ -0,0 +1,23 @@
++CREATE TABLE transactions (
++    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++    wallet_id UUID NOT NULL,
++    transaction_type VARCHAR(30) NOT NULL,
++    status VARCHAR(30) NOT NULL,
++    amount NUMERIC(19, 2) NOT NULL,
++    balance_before NUMERIC(19, 2) NOT NULL,
++    balance_after NUMERIC(19, 2) NOT NULL,
++    currency VARCHAR(3) NOT NULL,
++    reference_number VARCHAR(64) NOT NULL,
++    description VARCHAR(255) NOT NULL,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
++    CONSTRAINT fk_transactions_wallet FOREIGN KEY (wallet_id) REFERENCES wallets (id),
++    CONSTRAINT uk_transactions_reference_number UNIQUE (reference_number),
++    CONSTRAINT ck_transactions_type CHECK (transaction_type IN ('DEPOSIT', 'WITHDRAW')),
++    CONSTRAINT ck_transactions_status CHECK (status IN ('SUCCESS')),
++    CONSTRAINT ck_transactions_amount_positive CHECK (amount > 0),
++    CONSTRAINT ck_transactions_balance_before_non_negative CHECK (balance_before >= 0),
++    CONSTRAINT ck_transactions_balance_after_non_negative CHECK (balance_after >= 0),
++    CONSTRAINT ck_transactions_currency_length CHECK (char_length(currency) = 3)
++);
++
++CREATE INDEX idx_transactions_wallet_created_at ON transactions (wallet_id, created_at DESC);
+diff --git a/src/test/java/com/monika/payflow/transaction/controller/TransactionControllerTest.java b/src/test/java/com/monika/payflow/transaction/controller/TransactionControllerTest.java
+new file mode 100644
+index 0000000..b61d740
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/transaction/controller/TransactionControllerTest.java
+@@ -0,0 +1,93 @@
++package com.monika.payflow.transaction.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.transaction.entity.TransactionStatus;
++import com.monika.payflow.transaction.entity.TransactionType;
++import com.monika.payflow.transaction.service.TransactionService;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.http.ResponseEntity;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class TransactionControllerTest {
++
++    @Mock
++    private TransactionService transactionService;
++
++    @InjectMocks
++    private TransactionController transactionController;
++
++    @Test
++    void getTransactionHistoryReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        TransactionResponse transaction = transactionResponse(UUID.randomUUID());
++        when(transactionService.getTransactionHistory(userId)).thenReturn(List.of(transaction));
++
++        ResponseEntity<ApiResponse<List<TransactionResponse>>> response =
++                transactionController.getTransactionHistory(currentUser);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Transactions retrieved successfully");
++        assertThat(response.getBody().data()).containsExactly(transaction);
++    }
++
++    @Test
++    void getTransactionReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        UUID transactionId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        TransactionResponse transaction = transactionResponse(transactionId);
++        when(transactionService.getTransaction(userId, transactionId)).thenReturn(transaction);
++
++        ResponseEntity<ApiResponse<TransactionResponse>> response =
++                transactionController.getTransaction(currentUser, transactionId);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Transaction retrieved successfully");
++        assertThat(response.getBody().data()).isEqualTo(transaction);
++    }
++
++    private AuthUserDetails currentUser(UUID userId) {
++        User user = new User("monika@example.com", "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return new AuthUserDetails(user);
++    }
++
++    private TransactionResponse transactionResponse(UUID transactionId) {
++        return new TransactionResponse(
++                transactionId,
++                UUID.randomUUID(),
++                TransactionType.DEPOSIT,
++                TransactionStatus.SUCCESS,
++                new BigDecimal("25.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("125.00"),
++                "INR",
++                "TXN-" + UUID.randomUUID(),
++                "Wallet deposit",
++                Instant.now()
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java b/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java
+new file mode 100644
+index 0000000..06e7195
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java
+@@ -0,0 +1,81 @@
++package com.monika.payflow.transaction.repository;
++
++import com.monika.payflow.transaction.entity.Transaction;
++import com.monika.payflow.transaction.entity.TransactionStatus;
++import com.monika.payflow.transaction.entity.TransactionType;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.repository.UserRepository;
++import com.monika.payflow.wallet.entity.Wallet;
++import com.monika.payflow.wallet.entity.WalletStatus;
++import com.monika.payflow.wallet.repository.WalletRepository;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DataJpaTest(properties = {
++        "spring.flyway.enabled=false",
++        "spring.jpa.hibernate.ddl-auto=create-drop"
++})
++class TransactionRepositoryTest {
++
++    @Autowired
++    private UserRepository userRepository;
++
++    @Autowired
++    private WalletRepository walletRepository;
++
++    @Autowired
++    private TransactionRepository transactionRepository;
++
++    @Test
++    void findByWalletUserIdOrderByCreatedAtDescReturnsOnlyUserTransactions() {
++        Wallet firstWallet = wallet("first-owner@example.com");
++        Wallet secondWallet = wallet("second-owner@example.com");
++        Transaction olderTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
++        Transaction newerTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
++        transactionRepository.save(transaction(secondWallet, "TXN-" + UUID.randomUUID()));
++
++        List<Transaction> transactions = transactionRepository.findByWallet_User_IdOrderByCreatedAtDesc(firstWallet.userId());
++
++        assertThat(transactions)
++                .extracting(Transaction::id)
++                .containsExactly(newerTransaction.id(), olderTransaction.id());
++    }
++
++    @Test
++    void findByIdAndWalletUserIdRejectsTransactionsOwnedByAnotherUser() {
++        Wallet ownerWallet = wallet("owner@example.com");
++        Wallet otherWallet = wallet("other-owner@example.com");
++        Transaction transaction = transactionRepository.save(transaction(ownerWallet, "TXN-" + UUID.randomUUID()));
++
++        assertThat(transactionRepository.findByIdAndWallet_User_Id(transaction.id(), otherWallet.userId()))
++                .isEmpty();
++    }
++
++    private Wallet wallet(String email) {
++        User user = userRepository.save(new User(email, "encoded-password", UserRole.USER, UserStatus.ACTIVE));
++        return walletRepository.save(new Wallet(user, BigDecimal.ZERO.setScale(2), "INR", WalletStatus.ACTIVE));
++    }
++
++    private Transaction transaction(Wallet wallet, String referenceNumber) {
++        return new Transaction(
++                wallet,
++                TransactionType.DEPOSIT,
++                TransactionStatus.SUCCESS,
++                new BigDecimal("25.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("125.00"),
++                "INR",
++                referenceNumber,
++                "Wallet deposit"
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java b/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java
+new file mode 100644
+index 0000000..6edd3b9
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/transaction/service/TransactionServiceTest.java
+@@ -0,0 +1,154 @@
++package com.monika.payflow.transaction.service;
++
++import com.monika.payflow.common.exception.BadRequestException;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.transaction.dto.TransactionResponse;
++import com.monika.payflow.transaction.entity.Transaction;
++import com.monika.payflow.transaction.entity.TransactionStatus;
++import com.monika.payflow.transaction.entity.TransactionType;
++import com.monika.payflow.transaction.repository.TransactionRepository;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.wallet.entity.Wallet;
++import com.monika.payflow.wallet.entity.WalletStatus;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class TransactionServiceTest {
++
++    @Mock
++    private TransactionRepository transactionRepository;
++
++    @InjectMocks
++    private TransactionService transactionService;
++
++    @Test
++    void recordDepositCreatesSuccessfulDepositTransaction() {
++        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "125.25");
++
++        transactionService.recordDeposit(
++                wallet,
++                new BigDecimal("25.25"),
++                new BigDecimal("100.00"),
++                new BigDecimal("125.25")
++        );
++
++        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
++        verify(transactionRepository).save(captor.capture());
++
++        Transaction transaction = captor.getValue();
++        assertThat(transaction.walletId()).isEqualTo(wallet.id());
++        assertThat(transaction.transactionType()).isEqualTo(TransactionType.DEPOSIT);
++        assertThat(transaction.status()).isEqualTo(TransactionStatus.SUCCESS);
++        assertThat(transaction.amount()).isEqualByComparingTo("25.25");
++        assertThat(transaction.balanceBefore()).isEqualByComparingTo("100.00");
++        assertThat(transaction.balanceAfter()).isEqualByComparingTo("125.25");
++        assertThat(transaction.currency()).isEqualTo("INR");
++        assertThat(transaction.referenceNumber()).startsWith("TXN-");
++        assertThat(transaction.description()).isEqualTo("Wallet deposit");
++    }
++
++    @Test
++    void recordWithdrawalCreatesSuccessfulWithdrawalTransaction() {
++        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "60.00");
++
++        transactionService.recordWithdrawal(
++                wallet,
++                new BigDecimal("40.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("60.00")
++        );
++
++        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
++        verify(transactionRepository).save(captor.capture());
++
++        Transaction transaction = captor.getValue();
++        assertThat(transaction.transactionType()).isEqualTo(TransactionType.WITHDRAW);
++        assertThat(transaction.amount()).isEqualByComparingTo("40.00");
++        assertThat(transaction.balanceBefore()).isEqualByComparingTo("100.00");
++        assertThat(transaction.balanceAfter()).isEqualByComparingTo("60.00");
++        assertThat(transaction.description()).isEqualTo("Wallet withdrawal");
++    }
++
++    @Test
++    void recordRejectsInvalidAmount() {
++        Wallet wallet = wallet(UUID.randomUUID(), UUID.randomUUID(), "100.00");
++
++        assertThatThrownBy(() -> transactionService.recordDeposit(
++                wallet,
++                BigDecimal.ZERO,
++                new BigDecimal("100.00"),
++                new BigDecimal("100.00")
++        )).isInstanceOf(BadRequestException.class);
++    }
++
++    @Test
++    void getTransactionHistoryReturnsNewestFirstRepositoryResult() {
++        UUID userId = UUID.randomUUID();
++        Transaction transaction = transaction(wallet(userId, UUID.randomUUID(), "125.25"));
++        when(transactionRepository.findByWallet_User_IdOrderByCreatedAtDesc(userId)).thenReturn(List.of(transaction));
++
++        List<TransactionResponse> response = transactionService.getTransactionHistory(userId);
++
++        assertThat(response).hasSize(1);
++        assertThat(response.getFirst().id()).isEqualTo(transaction.id());
++        assertThat(response.getFirst().walletId()).isEqualTo(transaction.walletId());
++    }
++
++    @Test
++    void getTransactionRejectsTransactionOwnedByAnotherUser() {
++        UUID userId = UUID.randomUUID();
++        UUID transactionId = UUID.randomUUID();
++        when(transactionRepository.findByIdAndWallet_User_Id(transactionId, userId)).thenReturn(Optional.empty());
++
++        assertThatThrownBy(() -> transactionService.getTransaction(userId, transactionId))
++                .isInstanceOf(ResourceNotFoundException.class);
++    }
++
++    private Transaction transaction(Wallet wallet) {
++        Transaction transaction = new Transaction(
++                wallet,
++                TransactionType.DEPOSIT,
++                TransactionStatus.SUCCESS,
++                new BigDecimal("25.25"),
++                new BigDecimal("100.00"),
++                new BigDecimal("125.25"),
++                "INR",
++                "TXN-" + UUID.randomUUID(),
++                "Wallet deposit"
++        );
++        ReflectionTestUtils.setField(transaction, "id", UUID.randomUUID());
++        ReflectionTestUtils.setField(transaction, "createdAt", Instant.now());
++        return transaction;
++    }
++
++    private Wallet wallet(UUID userId, UUID walletId, String balance) {
++        Wallet wallet = new Wallet(user(userId), new BigDecimal(balance), "INR", WalletStatus.ACTIVE);
++        ReflectionTestUtils.setField(wallet, "id", walletId);
++        return wallet;
++    }
++
++    private User user(UUID userId) {
++        User user = new User("monika@example.com", "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return user;
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+index d05fbc8..579b72d 100644
+--- a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
++++ b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+@@ -3,6 +3,7 @@ package com.monika.payflow.wallet.service;
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.transaction.service.TransactionRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.user.entity.UserRole;
+ import com.monika.payflow.user.entity.UserStatus;
+@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
+ import static org.assertj.core.api.Assertions.assertThatThrownBy;
+ import static org.mockito.ArgumentMatchers.any;
+ import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoInteractions;
+ import static org.mockito.Mockito.when;
+ 
+ @ExtendWith(MockitoExtension.class)
+@@ -34,6 +36,9 @@ class WalletServiceTest {
+     @Mock
+     private WalletRepository walletRepository;
+ 
++    @Mock
++    private TransactionRecorder transactionRecorder;
++
+     @InjectMocks
+     private WalletService walletService;
+ 
+@@ -94,6 +99,12 @@ class WalletServiceTest {
+ 
+         assertThat(response.balance()).isEqualByComparingTo("125.25");
+         assertThat(wallet.balance()).isEqualByComparingTo("125.25");
++        verify(transactionRecorder).recordDeposit(
++                wallet,
++                new BigDecimal("25.25"),
++                new BigDecimal("100.00"),
++                new BigDecimal("125.25")
++        );
+     }
+ 
+     @Test
+@@ -106,6 +117,12 @@ class WalletServiceTest {
+ 
+         assertThat(response.balance()).isEqualByComparingTo("60.00");
+         assertThat(wallet.balance()).isEqualByComparingTo("60.00");
++        verify(transactionRecorder).recordWithdrawal(
++                wallet,
++                new BigDecimal("40.00"),
++                new BigDecimal("100.00"),
++                new BigDecimal("60.00")
++        );
+     }
+ 
+     @Test
+@@ -118,6 +135,7 @@ class WalletServiceTest {
+                 .isInstanceOf(BadRequestException.class);
+ 
+         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
+     }
+ 
+     @Test
+@@ -130,6 +148,7 @@ class WalletServiceTest {
+                 .isInstanceOf(BadRequestException.class);
+ 
+         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
++        verifyNoInteractions(transactionRecorder);
+     }
+ 
+     private Wallet wallet(UUID userId, String balance) {

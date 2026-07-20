@@ -4,6 +4,7 @@ import com.monika.payflow.common.error.ErrorCode;
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.transaction.service.TransactionRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.wallet.dto.WalletResponse;
 import com.monika.payflow.wallet.entity.Wallet;
@@ -22,9 +23,11 @@ public class WalletService implements WalletProvisioningService {
     private static final String DEFAULT_CURRENCY = "INR";
 
     private final WalletRepository walletRepository;
+    private final TransactionRecorder transactionRecorder;
 
-    public WalletService(WalletRepository walletRepository) {
+    public WalletService(WalletRepository walletRepository, TransactionRecorder transactionRecorder) {
         this.walletRepository = walletRepository;
+        this.transactionRecorder = transactionRecorder;
     }
 
     @Override
@@ -50,7 +53,13 @@ public class WalletService implements WalletProvisioningService {
     @Transactional
     public WalletResponse deposit(UUID userId, BigDecimal amount) {
         Wallet wallet = findWalletForUpdate(userId);
-        wallet.updateBalance(wallet.balance().add(normalizeAmount(amount)));
+        BigDecimal normalizedAmount = normalizeAmount(amount);
+        BigDecimal balanceBefore = wallet.balance();
+        BigDecimal balanceAfter = balanceBefore.add(normalizedAmount);
+
+        wallet.updateBalance(balanceAfter);
+        transactionRecorder.recordDeposit(wallet, normalizedAmount, balanceBefore, balanceAfter);
+
         return toResponse(wallet);
     }
 
@@ -58,15 +67,19 @@ public class WalletService implements WalletProvisioningService {
     public WalletResponse withdraw(UUID userId, BigDecimal amount) {
         Wallet wallet = findWalletForUpdate(userId);
         BigDecimal normalizedAmount = normalizeAmount(amount);
+        BigDecimal balanceBefore = wallet.balance();
 
-        if (wallet.balance().compareTo(normalizedAmount) < 0) {
+        if (balanceBefore.compareTo(normalizedAmount) < 0) {
             throw new BadRequestException(
                     ErrorCode.INSUFFICIENT_WALLET_BALANCE.defaultMessage(),
                     ErrorCode.INSUFFICIENT_WALLET_BALANCE
             );
         }
 
-        wallet.updateBalance(wallet.balance().subtract(normalizedAmount));
+        BigDecimal balanceAfter = balanceBefore.subtract(normalizedAmount);
+        wallet.updateBalance(balanceAfter);
+        transactionRecorder.recordWithdrawal(wallet, normalizedAmount, balanceBefore, balanceAfter);
+
         return toResponse(wallet);
     }
 

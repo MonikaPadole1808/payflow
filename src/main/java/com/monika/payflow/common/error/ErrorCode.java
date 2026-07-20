@@ -15,6 +15,7 @@ public enum ErrorCode {
     WALLET_NOT_FOUND("PF-404-002", "Wallet was not found", HttpStatus.NOT_FOUND),
     WALLET_ALREADY_EXISTS("PF-409-002", "Wallet already exists for this user", HttpStatus.CONFLICT),
     INSUFFICIENT_WALLET_BALANCE("PF-400-004", "Insufficient wallet balance", HttpStatus.BAD_REQUEST),
+    TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String code;
