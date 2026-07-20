@@ -13,6 +13,7 @@ import com.monika.payflow.common.error.ErrorCode;
 import com.monika.payflow.common.exception.AuthenticationFailedException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.InvalidRefreshTokenException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.service.UserAccountService;
 import com.monika.payflow.wallet.service.WalletProvisioningService;
@@ -39,6 +40,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
     private final WalletProvisioningService walletProvisioningService;
+    private final NotificationRecorder notificationRecorder;
 
     public AuthService(
             UserAccountService userAccountService,
@@ -47,7 +49,8 @@ public class AuthService {
             AuthenticationManager authenticationManager,
             JwtService jwtService,
             JwtProperties jwtProperties,
-            WalletProvisioningService walletProvisioningService
+            WalletProvisioningService walletProvisioningService,
+            NotificationRecorder notificationRecorder
     ) {
         this.userAccountService = userAccountService;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -56,6 +59,7 @@ public class AuthService {
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
         this.walletProvisioningService = walletProvisioningService;
+        this.notificationRecorder = notificationRecorder;
     }
 
     @Transactional
@@ -70,6 +74,7 @@ public class AuthService {
                 passwordEncoder.encode(request.password())
         );
         walletProvisioningService.createWalletForUser(savedUser);
+        notificationRecorder.recordRegistration(savedUser.id());
         return createAuthResponse(savedUser);
     }
 

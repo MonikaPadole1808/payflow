@@ -3,6 +3,7 @@ package com.monika.payflow.payment.service;
 import com.monika.payflow.common.error.ErrorCode;
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.payment.dto.PaymentResponse;
 import com.monika.payflow.payment.dto.PaymentTransferRequest;
 import com.monika.payflow.payment.entity.Payment;
@@ -28,15 +29,18 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final WalletTransferService walletTransferService;
     private final TransactionRecorder transactionRecorder;
+    private final NotificationRecorder notificationRecorder;
 
     public PaymentService(
             PaymentRepository paymentRepository,
             WalletTransferService walletTransferService,
-            TransactionRecorder transactionRecorder
+            TransactionRecorder transactionRecorder,
+            NotificationRecorder notificationRecorder
     ) {
         this.paymentRepository = paymentRepository;
         this.walletTransferService = walletTransferService;
         this.transactionRecorder = transactionRecorder;
+        this.notificationRecorder = notificationRecorder;
     }
 
     @Transactional
@@ -78,6 +82,8 @@ public class PaymentService {
                 receiverChange.balanceBefore(),
                 receiverChange.balanceAfter()
         );
+        notificationRecorder.recordPaymentSent(senderUserId, senderChange.amount());
+        notificationRecorder.recordPaymentReceived(request.receiverUserId(), receiverChange.amount());
 
         return toResponse(payment);
     }

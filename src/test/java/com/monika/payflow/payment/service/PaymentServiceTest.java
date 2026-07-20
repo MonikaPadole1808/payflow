@@ -2,6 +2,7 @@ package com.monika.payflow.payment.service;
 
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.payment.dto.PaymentResponse;
 import com.monika.payflow.payment.dto.PaymentTransferRequest;
 import com.monika.payflow.payment.entity.Payment;
@@ -47,6 +48,9 @@ class PaymentServiceTest {
 
     @Mock
     private TransactionRecorder transactionRecorder;
+
+    @Mock
+    private NotificationRecorder notificationRecorder;
 
     @InjectMocks
     private PaymentService paymentService;
@@ -99,6 +103,8 @@ class PaymentServiceTest {
                 new BigDecimal("20.00"),
                 new BigDecimal("50.00")
         );
+        verify(notificationRecorder).recordPaymentSent(senderUserId, new BigDecimal("30.00"));
+        verify(notificationRecorder).recordPaymentReceived(receiverUserId, new BigDecimal("30.00"));
         assertThat(response.status()).isEqualTo(PaymentStatus.SUCCESS);
     }
 
@@ -110,7 +116,7 @@ class PaymentServiceTest {
         assertThatThrownBy(() -> paymentService.transfer(userId, request))
                 .isInstanceOf(BadRequestException.class);
 
-        verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder);
+        verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder, notificationRecorder);
     }
 
     @Test

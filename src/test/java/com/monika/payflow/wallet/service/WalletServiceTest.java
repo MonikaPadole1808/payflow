@@ -3,6 +3,7 @@ package com.monika.payflow.wallet.service;
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.transaction.service.TransactionRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.entity.UserRole;
@@ -39,6 +40,9 @@ class WalletServiceTest {
 
     @Mock
     private TransactionRecorder transactionRecorder;
+
+    @Mock
+    private NotificationRecorder notificationRecorder;
 
     @InjectMocks
     private WalletService walletService;
@@ -106,6 +110,7 @@ class WalletServiceTest {
                 new BigDecimal("100.00"),
                 new BigDecimal("125.25")
         );
+        verify(notificationRecorder).recordDeposit(userId, new BigDecimal("25.25"));
     }
 
     @Test
@@ -124,6 +129,7 @@ class WalletServiceTest {
                 new BigDecimal("100.00"),
                 new BigDecimal("60.00")
         );
+        verify(notificationRecorder).recordWithdrawal(userId, new BigDecimal("40.00"));
     }
 
     @Test
@@ -137,6 +143,7 @@ class WalletServiceTest {
 
         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
         verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
     }
 
     @Test
@@ -150,6 +157,7 @@ class WalletServiceTest {
 
         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
         verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
     }
 
     @Test
@@ -174,6 +182,7 @@ class WalletServiceTest {
         assertThat(result.receiver().balanceBefore()).isEqualByComparingTo("20.00");
         assertThat(result.receiver().balanceAfter()).isEqualByComparingTo("50.00");
         verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
     }
 
     @Test
@@ -194,6 +203,7 @@ class WalletServiceTest {
         assertThat(senderWallet.balance()).isEqualByComparingTo("10.00");
         assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
         verifyNoInteractions(transactionRecorder);
+        verifyNoInteractions(notificationRecorder);
     }
 
     @Test

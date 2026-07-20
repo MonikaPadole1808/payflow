@@ -1,0 +1,1346 @@
+﻿diff --git a/document/V1/Architecture/API_Contract.md b/document/V1/Architecture/API_Contract.md
+index e83ca13..bcaf1ce 100644
+--- a/document/V1/Architecture/API_Contract.md
++++ b/document/V1/Architecture/API_Contract.md
+@@ -627,7 +627,122 @@ Rules
+ 
+ # 18. Notification APIs
+ 
+-No public APIs in Version 1.
++All Notification APIs require authentication.
++
++Authorization
++
++USER
++
++ADMIN
++
++---
++
++## Notification History
++
++GET
++
++/api/v1/notifications
++
++Purpose
++
++Return the authenticated user's notifications.
++
++Response
++
++{
++"success": true,
++"message": "Notifications retrieved successfully",
++"data": [
++{
++"id": "uuid",
++"userId": "uuid",
++"notificationType": "DEPOSIT",
++"status": "UNREAD",
++"title": "Deposit successful",
++"message": "Your wallet deposit of 100.00 was completed successfully.",
++"referenceNumber": "NTF-uuid",
++"createdAt": "timestamp",
++"readAt": null
++}
++]
++}
++
++Rules
++
++- Notifications are returned newest first.
++- Users can view only their own notifications.
++- No public create notification API exists in Version 1.
++
++---
++
++## Notification Details
++
++GET
++
++/api/v1/notifications/{id}
++
++Purpose
++
++Return one notification owned by the authenticated user.
++
++Response
++
++{
++"success": true,
++"message": "Notification retrieved successfully",
++"data": {
++"id": "uuid",
++"userId": "uuid",
++"notificationType": "PAYMENT_RECEIVED",
++"status": "UNREAD",
++"title": "Payment received",
++"message": "You received a payment of 100.00.",
++"referenceNumber": "NTF-uuid",
++"createdAt": "timestamp",
++"readAt": null
++}
++}
++
++Rules
++
++- Users can view only their own notifications.
++
++---
++
++## Mark Notification As Read
++
++PATCH
++
++/api/v1/notifications/{id}/read
++
++Purpose
++
++Mark one notification owned by the authenticated user as READ.
++
++Response
++
++{
++"success": true,
++"message": "Notification marked as read successfully",
++"data": {
++"id": "uuid",
++"userId": "uuid",
++"notificationType": "DEPOSIT",
++"status": "READ",
++"title": "Deposit successful",
++"message": "Your wallet deposit of 100.00 was completed successfully.",
++"referenceNumber": "NTF-uuid",
++"createdAt": "timestamp",
++"readAt": "timestamp"
++}
++}
++
++Rules
++
++- Users can mark only their own notifications as read.
++- Mark-as-read is idempotent.
++- Version 1 supports REGISTRATION, DEPOSIT, WITHDRAW, PAYMENT_SENT, and PAYMENT_RECEIVED notification types.
++- Version 1 supports UNREAD and READ notification statuses.
+ 
+ ---
+ 
+diff --git a/document/V1/Architecture/Database_Design.md b/document/V1/Architecture/Database_Design.md
+index 3545371..14ca14b 100644
+--- a/document/V1/Architecture/Database_Design.md
++++ b/document/V1/Architecture/Database_Design.md
+@@ -232,6 +232,7 @@ idx_wallet_user
+ | wallets | wallet |
+ | payments | payment |
+ | transactions | transaction |
++| notifications | notification |
+ | refresh_tokens | auth |
+ 
+ Cross-module ownership is prohibited.
+@@ -625,6 +626,61 @@ Rules
+ 
+ ---
+ 
++## notifications
++
++Owner Module
++
++notification
++
++Purpose
++
++Stores notification history for successful business events.
++
++Relationship
++
++One user has many notifications.
++
++Columns
++
++| Column | Type | Rule |
++|--------|------|------|
++| id | UUID | Primary key |
++| user_id | UUID | Required, references users(id) |
++| notification_type | VARCHAR(30) | Required, REGISTRATION, DEPOSIT, WITHDRAW, PAYMENT_SENT, or PAYMENT_RECEIVED |
++| status | VARCHAR(30) | Required, UNREAD or READ |
++| title | VARCHAR(120) | Required, cannot be blank |
++| message | VARCHAR(500) | Required, cannot be blank |
++| reference_number | VARCHAR(64) | Required, cannot be blank |
++| created_at | TIMESTAMPTZ | Required |
++| read_at | TIMESTAMPTZ | Required when status is READ, null when status is UNREAD |
++
++Constraints
++
++- `fk_notifications_user`
++- `ck_notifications_type`
++- `ck_notifications_status`
++- `ck_notifications_read_state`
++- `ck_notifications_title_not_blank`
++- `ck_notifications_message_not_blank`
++- `ck_notifications_reference_number_not_blank`
++
++Indexes
++
++- `idx_notifications_user_created_at`
++
++Migration
++
++- `V7__create_notifications_table.sql`
++
++Rules
++
++- Notifications are created internally only after successful business operations.
++- Users can access only their own notifications.
++- Notifications are never deleted.
++- Mark-as-read is idempotent.
++
++---
++
+ # 21. Approval
+ 
+ Status
+diff --git a/src/main/java/com/monika/payflow/auth/service/AuthService.java b/src/main/java/com/monika/payflow/auth/service/AuthService.java
+index ab12526..3109125 100644
+--- a/src/main/java/com/monika/payflow/auth/service/AuthService.java
++++ b/src/main/java/com/monika/payflow/auth/service/AuthService.java
+@@ -13,6 +13,7 @@ import com.monika.payflow.common.error.ErrorCode;
+ import com.monika.payflow.common.exception.AuthenticationFailedException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.InvalidRefreshTokenException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.user.service.UserAccountService;
+ import com.monika.payflow.wallet.service.WalletProvisioningService;
+@@ -39,6 +40,7 @@ public class AuthService {
+     private final JwtService jwtService;
+     private final JwtProperties jwtProperties;
+     private final WalletProvisioningService walletProvisioningService;
++    private final NotificationRecorder notificationRecorder;
+ 
+     public AuthService(
+             UserAccountService userAccountService,
+@@ -47,7 +49,8 @@ public class AuthService {
+             AuthenticationManager authenticationManager,
+             JwtService jwtService,
+             JwtProperties jwtProperties,
+-            WalletProvisioningService walletProvisioningService
++            WalletProvisioningService walletProvisioningService,
++            NotificationRecorder notificationRecorder
+     ) {
+         this.userAccountService = userAccountService;
+         this.refreshTokenRepository = refreshTokenRepository;
+@@ -56,6 +59,7 @@ public class AuthService {
+         this.jwtService = jwtService;
+         this.jwtProperties = jwtProperties;
+         this.walletProvisioningService = walletProvisioningService;
++        this.notificationRecorder = notificationRecorder;
+     }
+ 
+     @Transactional
+@@ -70,6 +74,7 @@ public class AuthService {
+                 passwordEncoder.encode(request.password())
+         );
+         walletProvisioningService.createWalletForUser(savedUser);
++        notificationRecorder.recordRegistration(savedUser.id());
+         return createAuthResponse(savedUser);
+     }
+ 
+diff --git a/src/main/java/com/monika/payflow/common/error/ErrorCode.java b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+index c0d3fc8..72bcab2 100644
+--- a/src/main/java/com/monika/payflow/common/error/ErrorCode.java
++++ b/src/main/java/com/monika/payflow/common/error/ErrorCode.java
+@@ -18,6 +18,7 @@ public enum ErrorCode {
+     TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
+     PAYMENT_NOT_FOUND("PF-404-004", "Payment was not found", HttpStatus.NOT_FOUND),
+     PAYMENT_SELF_TRANSFER_NOT_ALLOWED("PF-400-005", "Users cannot transfer money to themselves", HttpStatus.BAD_REQUEST),
++    NOTIFICATION_NOT_FOUND("PF-404-005", "Notification was not found", HttpStatus.NOT_FOUND),
+     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
+ 
+     private final String code;
+diff --git a/src/main/java/com/monika/payflow/notification/controller/NotificationController.java b/src/main/java/com/monika/payflow/notification/controller/NotificationController.java
+new file mode 100644
+index 0000000..f17a00e
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/controller/NotificationController.java
+@@ -0,0 +1,54 @@
++package com.monika.payflow.notification.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.common.constants.AppConstants;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.notification.service.NotificationService;
++import org.springframework.http.ResponseEntity;
++import org.springframework.security.core.annotation.AuthenticationPrincipal;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PatchMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RestController;
++
++import java.util.List;
++import java.util.UUID;
++
++@RestController
++@RequestMapping(AppConstants.API_BASE_PATH + "/notifications")
++public class NotificationController {
++
++    private final NotificationService notificationService;
++
++    public NotificationController(NotificationService notificationService) {
++        this.notificationService = notificationService;
++    }
++
++    @GetMapping
++    public ResponseEntity<ApiResponse<List<NotificationResponse>>> getNotificationHistory(
++            @AuthenticationPrincipal AuthUserDetails currentUser
++    ) {
++        List<NotificationResponse> response = notificationService.getNotificationHistory(currentUser.id());
++        return ResponseEntity.ok(ApiResponse.success("Notifications retrieved successfully", response));
++    }
++
++    @GetMapping("/{id}")
++    public ResponseEntity<ApiResponse<NotificationResponse>> getNotification(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @PathVariable UUID id
++    ) {
++        NotificationResponse response = notificationService.getNotification(currentUser.id(), id);
++        return ResponseEntity.ok(ApiResponse.success("Notification retrieved successfully", response));
++    }
++
++    @PatchMapping("/{id}/read")
++    public ResponseEntity<ApiResponse<NotificationResponse>> markAsRead(
++            @AuthenticationPrincipal AuthUserDetails currentUser,
++            @PathVariable UUID id
++    ) {
++        NotificationResponse response = notificationService.markAsRead(currentUser.id(), id);
++        return ResponseEntity.ok(ApiResponse.success("Notification marked as read successfully", response));
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/notification/dto/NotificationResponse.java b/src/main/java/com/monika/payflow/notification/dto/NotificationResponse.java
+new file mode 100644
+index 0000000..e9c95c1
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/dto/NotificationResponse.java
+@@ -0,0 +1,20 @@
++package com.monika.payflow.notification.dto;
++
++import com.monika.payflow.notification.entity.NotificationStatus;
++import com.monika.payflow.notification.entity.NotificationType;
++
++import java.time.Instant;
++import java.util.UUID;
++
++public record NotificationResponse(
++        UUID id,
++        UUID userId,
++        NotificationType notificationType,
++        NotificationStatus status,
++        String title,
++        String message,
++        String referenceNumber,
++        Instant createdAt,
++        Instant readAt
++) {
++}
+diff --git a/src/main/java/com/monika/payflow/notification/entity/Notification.java b/src/main/java/com/monika/payflow/notification/entity/Notification.java
+new file mode 100644
+index 0000000..e3b56b2
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/entity/Notification.java
+@@ -0,0 +1,117 @@
++package com.monika.payflow.notification.entity;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.EnumType;
++import jakarta.persistence.Enumerated;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.Id;
++import jakarta.persistence.PrePersist;
++import jakarta.persistence.Table;
++
++import java.time.Instant;
++import java.util.UUID;
++
++@Entity
++@Table(name = "notifications")
++public class Notification {
++
++    @Id
++    @GeneratedValue
++    private UUID id;
++
++    @Column(nullable = false, name = "user_id")
++    private UUID userId;
++
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, name = "notification_type", length = 30)
++    private NotificationType notificationType;
++
++    @Enumerated(EnumType.STRING)
++    @Column(nullable = false, length = 30)
++    private NotificationStatus status;
++
++    @Column(nullable = false, length = 120)
++    private String title;
++
++    @Column(nullable = false, length = 500)
++    private String message;
++
++    @Column(nullable = false, name = "reference_number", length = 64)
++    private String referenceNumber;
++
++    @Column(nullable = false, name = "created_at", updatable = false)
++    private Instant createdAt;
++
++    @Column(name = "read_at")
++    private Instant readAt;
++
++    protected Notification() {
++    }
++
++    public Notification(
++            UUID userId,
++            NotificationType notificationType,
++            NotificationStatus status,
++            String title,
++            String message,
++            String referenceNumber
++    ) {
++        this.userId = userId;
++        this.notificationType = notificationType;
++        this.status = status;
++        this.title = title;
++        this.message = message;
++        this.referenceNumber = referenceNumber;
++    }
++
++    @PrePersist
++    void prePersist() {
++        this.createdAt = Instant.now();
++    }
++
++    public UUID id() {
++        return id;
++    }
++
++    public UUID userId() {
++        return userId;
++    }
++
++    public NotificationType notificationType() {
++        return notificationType;
++    }
++
++    public NotificationStatus status() {
++        return status;
++    }
++
++    public String title() {
++        return title;
++    }
++
++    public String message() {
++        return message;
++    }
++
++    public String referenceNumber() {
++        return referenceNumber;
++    }
++
++    public Instant createdAt() {
++        return createdAt;
++    }
++
++    public Instant readAt() {
++        return readAt;
++    }
++
++    public void markAsRead() {
++        if (status == NotificationStatus.READ) {
++            return;
++        }
++
++        this.status = NotificationStatus.READ;
++        this.readAt = Instant.now();
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/notification/entity/NotificationStatus.java b/src/main/java/com/monika/payflow/notification/entity/NotificationStatus.java
+new file mode 100644
+index 0000000..4453ac7
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/entity/NotificationStatus.java
+@@ -0,0 +1,6 @@
++package com.monika.payflow.notification.entity;
++
++public enum NotificationStatus {
++    UNREAD,
++    READ
++}
+diff --git a/src/main/java/com/monika/payflow/notification/entity/NotificationType.java b/src/main/java/com/monika/payflow/notification/entity/NotificationType.java
+new file mode 100644
+index 0000000..8ca67e4
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/entity/NotificationType.java
+@@ -0,0 +1,9 @@
++package com.monika.payflow.notification.entity;
++
++public enum NotificationType {
++    REGISTRATION,
++    DEPOSIT,
++    WITHDRAW,
++    PAYMENT_SENT,
++    PAYMENT_RECEIVED
++}
+diff --git a/src/main/java/com/monika/payflow/notification/repository/NotificationRepository.java b/src/main/java/com/monika/payflow/notification/repository/NotificationRepository.java
+new file mode 100644
+index 0000000..0e2068a
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/repository/NotificationRepository.java
+@@ -0,0 +1,15 @@
++package com.monika.payflow.notification.repository;
++
++import com.monika.payflow.notification.entity.Notification;
++import org.springframework.data.jpa.repository.JpaRepository;
++
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++public interface NotificationRepository extends JpaRepository<Notification, UUID> {
++
++    List<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId);
++
++    Optional<Notification> findByIdAndUserId(UUID id, UUID userId);
++}
+diff --git a/src/main/java/com/monika/payflow/notification/service/NotificationRecorder.java b/src/main/java/com/monika/payflow/notification/service/NotificationRecorder.java
+new file mode 100644
+index 0000000..82266cc
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/service/NotificationRecorder.java
+@@ -0,0 +1,17 @@
++package com.monika.payflow.notification.service;
++
++import java.math.BigDecimal;
++import java.util.UUID;
++
++public interface NotificationRecorder {
++
++    void recordRegistration(UUID userId);
++
++    void recordDeposit(UUID userId, BigDecimal amount);
++
++    void recordWithdrawal(UUID userId, BigDecimal amount);
++
++    void recordPaymentSent(UUID userId, BigDecimal amount);
++
++    void recordPaymentReceived(UUID userId, BigDecimal amount);
++}
+diff --git a/src/main/java/com/monika/payflow/notification/service/NotificationService.java b/src/main/java/com/monika/payflow/notification/service/NotificationService.java
+new file mode 100644
+index 0000000..d12f6e8
+--- /dev/null
++++ b/src/main/java/com/monika/payflow/notification/service/NotificationService.java
+@@ -0,0 +1,141 @@
++package com.monika.payflow.notification.service;
++
++import com.monika.payflow.common.error.ErrorCode;
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.notification.entity.Notification;
++import com.monika.payflow.notification.entity.NotificationStatus;
++import com.monika.payflow.notification.entity.NotificationType;
++import com.monika.payflow.notification.repository.NotificationRepository;
++import org.springframework.stereotype.Service;
++import org.springframework.transaction.annotation.Transactional;
++
++import java.math.BigDecimal;
++import java.util.List;
++import java.util.UUID;
++
++@Service
++public class NotificationService implements NotificationRecorder {
++
++    private static final String REFERENCE_PREFIX = "NTF-";
++
++    private final NotificationRepository notificationRepository;
++
++    public NotificationService(NotificationRepository notificationRepository) {
++        this.notificationRepository = notificationRepository;
++    }
++
++    @Override
++    public void recordRegistration(UUID userId) {
++        createUnread(
++                userId,
++                NotificationType.REGISTRATION,
++                "Registration completed",
++                "Your PayFlow account has been created successfully."
++        );
++    }
++
++    @Override
++    public void recordDeposit(UUID userId, BigDecimal amount) {
++        createUnread(
++                userId,
++                NotificationType.DEPOSIT,
++                "Deposit successful",
++                "Your wallet deposit of %s was completed successfully.".formatted(formatAmount(amount))
++        );
++    }
++
++    @Override
++    public void recordWithdrawal(UUID userId, BigDecimal amount) {
++        createUnread(
++                userId,
++                NotificationType.WITHDRAW,
++                "Withdrawal successful",
++                "Your wallet withdrawal of %s was completed successfully.".formatted(formatAmount(amount))
++        );
++    }
++
++    @Override
++    public void recordPaymentSent(UUID userId, BigDecimal amount) {
++        createUnread(
++                userId,
++                NotificationType.PAYMENT_SENT,
++                "Payment sent",
++                "Your payment of %s was sent successfully.".formatted(formatAmount(amount))
++        );
++    }
++
++    @Override
++    public void recordPaymentReceived(UUID userId, BigDecimal amount) {
++        createUnread(
++                userId,
++                NotificationType.PAYMENT_RECEIVED,
++                "Payment received",
++                "You received a payment of %s.".formatted(formatAmount(amount))
++        );
++    }
++
++    @Transactional(readOnly = true)
++    public List<NotificationResponse> getNotificationHistory(UUID userId) {
++        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId)
++                .stream()
++                .map(this::toResponse)
++                .toList();
++    }
++
++    @Transactional(readOnly = true)
++    public NotificationResponse getNotification(UUID userId, UUID notificationId) {
++        Notification notification = findOwnedNotification(userId, notificationId);
++        return toResponse(notification);
++    }
++
++    @Transactional
++    public NotificationResponse markAsRead(UUID userId, UUID notificationId) {
++        Notification notification = findOwnedNotification(userId, notificationId);
++        notification.markAsRead();
++        return toResponse(notification);
++    }
++
++    private void createUnread(UUID userId, NotificationType notificationType, String title, String message) {
++        Notification notification = new Notification(
++                userId,
++                notificationType,
++                NotificationStatus.UNREAD,
++                title,
++                message,
++                generateReferenceNumber()
++        );
++
++        notificationRepository.save(notification);
++    }
++
++    private Notification findOwnedNotification(UUID userId, UUID notificationId) {
++        return notificationRepository.findByIdAndUserId(notificationId, userId)
++                .orElseThrow(() -> new ResourceNotFoundException(
++                        ErrorCode.NOTIFICATION_NOT_FOUND.defaultMessage(),
++                        ErrorCode.NOTIFICATION_NOT_FOUND
++                ));
++    }
++
++    private String generateReferenceNumber() {
++        return REFERENCE_PREFIX + UUID.randomUUID();
++    }
++
++    private String formatAmount(BigDecimal amount) {
++        return amount.setScale(2).toPlainString();
++    }
++
++    private NotificationResponse toResponse(Notification notification) {
++        return new NotificationResponse(
++                notification.id(),
++                notification.userId(),
++                notification.notificationType(),
++                notification.status(),
++                notification.title(),
++                notification.message(),
++                notification.referenceNumber(),
++                notification.createdAt(),
++                notification.readAt()
++        );
++    }
++}
+diff --git a/src/main/java/com/monika/payflow/payment/service/PaymentService.java b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+index 8293267..3ff8a76 100644
+--- a/src/main/java/com/monika/payflow/payment/service/PaymentService.java
++++ b/src/main/java/com/monika/payflow/payment/service/PaymentService.java
+@@ -3,6 +3,7 @@ package com.monika.payflow.payment.service;
+ import com.monika.payflow.common.error.ErrorCode;
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.payment.dto.PaymentResponse;
+ import com.monika.payflow.payment.dto.PaymentTransferRequest;
+ import com.monika.payflow.payment.entity.Payment;
+@@ -28,15 +29,18 @@ public class PaymentService {
+     private final PaymentRepository paymentRepository;
+     private final WalletTransferService walletTransferService;
+     private final TransactionRecorder transactionRecorder;
++    private final NotificationRecorder notificationRecorder;
+ 
+     public PaymentService(
+             PaymentRepository paymentRepository,
+             WalletTransferService walletTransferService,
+-            TransactionRecorder transactionRecorder
++            TransactionRecorder transactionRecorder,
++            NotificationRecorder notificationRecorder
+     ) {
+         this.paymentRepository = paymentRepository;
+         this.walletTransferService = walletTransferService;
+         this.transactionRecorder = transactionRecorder;
++        this.notificationRecorder = notificationRecorder;
+     }
+ 
+     @Transactional
+@@ -78,6 +82,8 @@ public class PaymentService {
+                 receiverChange.balanceBefore(),
+                 receiverChange.balanceAfter()
+         );
++        notificationRecorder.recordPaymentSent(senderUserId, senderChange.amount());
++        notificationRecorder.recordPaymentReceived(request.receiverUserId(), receiverChange.amount());
+ 
+         return toResponse(payment);
+     }
+diff --git a/src/main/java/com/monika/payflow/wallet/service/WalletService.java b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+index 5a092c2..8f4485d 100644
+--- a/src/main/java/com/monika/payflow/wallet/service/WalletService.java
++++ b/src/main/java/com/monika/payflow/wallet/service/WalletService.java
+@@ -4,6 +4,7 @@ import com.monika.payflow.common.error.ErrorCode;
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.transaction.service.TransactionRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.wallet.dto.WalletResponse;
+@@ -27,10 +28,16 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+ 
+     private final WalletRepository walletRepository;
+     private final TransactionRecorder transactionRecorder;
++    private final NotificationRecorder notificationRecorder;
+ 
+-    public WalletService(WalletRepository walletRepository, TransactionRecorder transactionRecorder) {
++    public WalletService(
++            WalletRepository walletRepository,
++            TransactionRecorder transactionRecorder,
++            NotificationRecorder notificationRecorder
++    ) {
+         this.walletRepository = walletRepository;
+         this.transactionRecorder = transactionRecorder;
++        this.notificationRecorder = notificationRecorder;
+     }
+ 
+     @Override
+@@ -62,6 +69,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+ 
+         wallet.updateBalance(balanceAfter);
+         transactionRecorder.recordDeposit(wallet, normalizedAmount, balanceBefore, balanceAfter);
++        notificationRecorder.recordDeposit(userId, normalizedAmount);
+ 
+         return toResponse(wallet);
+     }
+@@ -82,6 +90,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
+         BigDecimal balanceAfter = balanceBefore.subtract(normalizedAmount);
+         wallet.updateBalance(balanceAfter);
+         transactionRecorder.recordWithdrawal(wallet, normalizedAmount, balanceBefore, balanceAfter);
++        notificationRecorder.recordWithdrawal(userId, normalizedAmount);
+ 
+         return toResponse(wallet);
+     }
+diff --git a/src/main/resources/db/migration/V7__create_notifications_table.sql b/src/main/resources/db/migration/V7__create_notifications_table.sql
+new file mode 100644
+index 0000000..eafa3e2
+--- /dev/null
++++ b/src/main/resources/db/migration/V7__create_notifications_table.sql
+@@ -0,0 +1,25 @@
++CREATE TABLE notifications (
++    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++    user_id UUID NOT NULL,
++    notification_type VARCHAR(30) NOT NULL,
++    status VARCHAR(30) NOT NULL,
++    title VARCHAR(120) NOT NULL,
++    message VARCHAR(500) NOT NULL,
++    reference_number VARCHAR(64) NOT NULL,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
++    read_at TIMESTAMPTZ,
++    CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users (id),
++    CONSTRAINT ck_notifications_type CHECK (
++        notification_type IN ('REGISTRATION', 'DEPOSIT', 'WITHDRAW', 'PAYMENT_SENT', 'PAYMENT_RECEIVED')
++    ),
++    CONSTRAINT ck_notifications_status CHECK (status IN ('UNREAD', 'READ')),
++    CONSTRAINT ck_notifications_read_state CHECK (
++        (status = 'UNREAD' AND read_at IS NULL)
++        OR (status = 'READ' AND read_at IS NOT NULL)
++    ),
++    CONSTRAINT ck_notifications_title_not_blank CHECK (length(trim(title)) > 0),
++    CONSTRAINT ck_notifications_message_not_blank CHECK (length(trim(message)) > 0),
++    CONSTRAINT ck_notifications_reference_number_not_blank CHECK (length(trim(reference_number)) > 0)
++);
++
++CREATE INDEX idx_notifications_user_created_at ON notifications (user_id, created_at DESC);
+diff --git a/src/test/java/com/monika/payflow/auth/service/AuthServiceTest.java b/src/test/java/com/monika/payflow/auth/service/AuthServiceTest.java
+index c3349b7..3da4086 100644
+--- a/src/test/java/com/monika/payflow/auth/service/AuthServiceTest.java
++++ b/src/test/java/com/monika/payflow/auth/service/AuthServiceTest.java
+@@ -11,6 +11,7 @@ import com.monika.payflow.auth.security.JwtService;
+ import com.monika.payflow.common.exception.AuthenticationFailedException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.InvalidRefreshTokenException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.user.entity.UserRole;
+ import com.monika.payflow.user.entity.UserStatus;
+@@ -58,6 +59,9 @@ class AuthServiceTest {
+     @Mock
+     private WalletProvisioningService walletProvisioningService;
+ 
++    @Mock
++    private NotificationRecorder notificationRecorder;
++
+     @InjectMocks
+     private AuthService authService;
+ 
+@@ -78,6 +82,7 @@ class AuthServiceTest {
+ 
+         verify(userAccountService).createActiveUser("monika@example.com", "encoded");
+         verify(walletProvisioningService).createWalletForUser(savedUser);
++        verify(notificationRecorder).recordRegistration(savedUser.id());
+         assertThat(response.accessToken()).isEqualTo("access-token");
+         assertThat(response.refreshToken()).isNotBlank();
+         assertThat(response.tokenType()).isEqualTo("Bearer");
+diff --git a/src/test/java/com/monika/payflow/notification/controller/NotificationControllerTest.java b/src/test/java/com/monika/payflow/notification/controller/NotificationControllerTest.java
+new file mode 100644
+index 0000000..09f7656
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/notification/controller/NotificationControllerTest.java
+@@ -0,0 +1,109 @@
++package com.monika.payflow.notification.controller;
++
++import com.monika.payflow.auth.security.AuthUserDetails;
++import com.monika.payflow.common.api.ApiResponse;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.notification.entity.NotificationStatus;
++import com.monika.payflow.notification.entity.NotificationType;
++import com.monika.payflow.notification.service.NotificationService;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.http.ResponseEntity;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.time.Instant;
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class NotificationControllerTest {
++
++    @Mock
++    private NotificationService notificationService;
++
++    @InjectMocks
++    private NotificationController notificationController;
++
++    @Test
++    void getNotificationHistoryReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        NotificationResponse notification = notificationResponse(UUID.randomUUID(), NotificationStatus.UNREAD);
++        when(notificationService.getNotificationHistory(userId)).thenReturn(List.of(notification));
++
++        ResponseEntity<ApiResponse<List<NotificationResponse>>> response =
++                notificationController.getNotificationHistory(currentUser);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Notifications retrieved successfully");
++        assertThat(response.getBody().data()).containsExactly(notification);
++    }
++
++    @Test
++    void getNotificationReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        UUID notificationId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        NotificationResponse notification = notificationResponse(notificationId, NotificationStatus.UNREAD);
++        when(notificationService.getNotification(userId, notificationId)).thenReturn(notification);
++
++        ResponseEntity<ApiResponse<NotificationResponse>> response =
++                notificationController.getNotification(currentUser, notificationId);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Notification retrieved successfully");
++        assertThat(response.getBody().data()).isEqualTo(notification);
++    }
++
++    @Test
++    void markAsReadReturnsStandardApiResponse() {
++        UUID userId = UUID.randomUUID();
++        UUID notificationId = UUID.randomUUID();
++        AuthUserDetails currentUser = currentUser(userId);
++        NotificationResponse notification = notificationResponse(notificationId, NotificationStatus.READ);
++        when(notificationService.markAsRead(userId, notificationId)).thenReturn(notification);
++
++        ResponseEntity<ApiResponse<NotificationResponse>> response =
++                notificationController.markAsRead(currentUser, notificationId);
++
++        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
++        assertThat(response.getBody()).isNotNull();
++        assertThat(response.getBody().success()).isTrue();
++        assertThat(response.getBody().message()).isEqualTo("Notification marked as read successfully");
++        assertThat(response.getBody().data()).isEqualTo(notification);
++    }
++
++    private AuthUserDetails currentUser(UUID userId) {
++        User user = new User("monika@example.com", "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++        ReflectionTestUtils.setField(user, "id", userId);
++        return new AuthUserDetails(user);
++    }
++
++    private NotificationResponse notificationResponse(UUID notificationId, NotificationStatus status) {
++        Instant readAt = status == NotificationStatus.READ ? Instant.now() : null;
++        return new NotificationResponse(
++                notificationId,
++                UUID.randomUUID(),
++                NotificationType.DEPOSIT,
++                status,
++                "Deposit successful",
++                "Your wallet deposit was completed successfully.",
++                "NTF-" + UUID.randomUUID(),
++                Instant.now(),
++                readAt
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/notification/repository/NotificationRepositoryTest.java b/src/test/java/com/monika/payflow/notification/repository/NotificationRepositoryTest.java
+new file mode 100644
+index 0000000..6b5531b
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/notification/repository/NotificationRepositoryTest.java
+@@ -0,0 +1,71 @@
++package com.monika.payflow.notification.repository;
++
++import com.monika.payflow.notification.entity.Notification;
++import com.monika.payflow.notification.entity.NotificationStatus;
++import com.monika.payflow.notification.entity.NotificationType;
++import com.monika.payflow.user.entity.User;
++import com.monika.payflow.user.entity.UserRole;
++import com.monika.payflow.user.entity.UserStatus;
++import com.monika.payflow.user.repository.UserRepository;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
++
++import java.util.List;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DataJpaTest(properties = {
++        "spring.flyway.enabled=false",
++        "spring.jpa.hibernate.ddl-auto=create-drop"
++})
++class NotificationRepositoryTest {
++
++    @Autowired
++    private UserRepository userRepository;
++
++    @Autowired
++    private NotificationRepository notificationRepository;
++
++    @Test
++    void findByUserIdOrderByCreatedAtDescReturnsOnlyUserNotifications() throws InterruptedException {
++        User firstUser = userRepository.save(user("first@example.com"));
++        User secondUser = userRepository.save(user("second@example.com"));
++        Notification olderNotification = notificationRepository.save(notification(firstUser.id()));
++        Thread.sleep(5);
++        Notification newerNotification = notificationRepository.save(notification(firstUser.id()));
++        notificationRepository.save(notification(secondUser.id()));
++
++        List<Notification> notifications = notificationRepository.findByUserIdOrderByCreatedAtDesc(firstUser.id());
++
++        assertThat(notifications)
++                .extracting(Notification::id)
++                .containsExactly(newerNotification.id(), olderNotification.id());
++    }
++
++    @Test
++    void findByIdAndUserIdRejectsNotificationsOwnedByAnotherUser() {
++        User owner = userRepository.save(user("owner@example.com"));
++        User otherUser = userRepository.save(user("other@example.com"));
++        Notification notification = notificationRepository.save(notification(owner.id()));
++
++        assertThat(notificationRepository.findByIdAndUserId(notification.id(), otherUser.id()))
++                .isEmpty();
++    }
++
++    private User user(String email) {
++        return new User(email, "encoded-password", UserRole.USER, UserStatus.ACTIVE);
++    }
++
++    private Notification notification(UUID userId) {
++        return new Notification(
++                userId,
++                NotificationType.DEPOSIT,
++                NotificationStatus.UNREAD,
++                "Deposit successful",
++                "Your wallet deposit was completed successfully.",
++                "NTF-" + UUID.randomUUID()
++        );
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/notification/service/NotificationServiceTest.java b/src/test/java/com/monika/payflow/notification/service/NotificationServiceTest.java
+new file mode 100644
+index 0000000..0f01eec
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/notification/service/NotificationServiceTest.java
+@@ -0,0 +1,168 @@
++package com.monika.payflow.notification.service;
++
++import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.dto.NotificationResponse;
++import com.monika.payflow.notification.entity.Notification;
++import com.monika.payflow.notification.entity.NotificationStatus;
++import com.monika.payflow.notification.entity.NotificationType;
++import com.monika.payflow.notification.repository.NotificationRepository;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.extension.ExtendWith;
++import org.mockito.ArgumentCaptor;
++import org.mockito.InjectMocks;
++import org.mockito.Mock;
++import org.mockito.junit.jupiter.MockitoExtension;
++import org.springframework.test.util.ReflectionTestUtils;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++@ExtendWith(MockitoExtension.class)
++class NotificationServiceTest {
++
++    @Mock
++    private NotificationRepository notificationRepository;
++
++    @InjectMocks
++    private NotificationService notificationService;
++
++    @Test
++    void recordRegistrationCreatesUnreadRegistrationNotification() {
++        UUID userId = UUID.randomUUID();
++
++        notificationService.recordRegistration(userId);
++
++        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
++        verify(notificationRepository).save(captor.capture());
++
++        Notification notification = captor.getValue();
++        assertThat(notification.userId()).isEqualTo(userId);
++        assertThat(notification.notificationType()).isEqualTo(NotificationType.REGISTRATION);
++        assertThat(notification.status()).isEqualTo(NotificationStatus.UNREAD);
++        assertThat(notification.title()).isEqualTo("Registration completed");
++        assertThat(notification.referenceNumber()).startsWith("NTF-");
++    }
++
++    @Test
++    void recordDepositCreatesUnreadDepositNotification() {
++        UUID userId = UUID.randomUUID();
++
++        notificationService.recordDeposit(userId, new BigDecimal("25.25"));
++
++        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
++        verify(notificationRepository).save(captor.capture());
++
++        Notification notification = captor.getValue();
++        assertThat(notification.notificationType()).isEqualTo(NotificationType.DEPOSIT);
++        assertThat(notification.message()).contains("25.25");
++    }
++
++    @Test
++    void recordWithdrawalCreatesUnreadWithdrawalNotification() {
++        UUID userId = UUID.randomUUID();
++
++        notificationService.recordWithdrawal(userId, new BigDecimal("40.00"));
++
++        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
++        verify(notificationRepository).save(captor.capture());
++
++        Notification notification = captor.getValue();
++        assertThat(notification.notificationType()).isEqualTo(NotificationType.WITHDRAW);
++        assertThat(notification.message()).contains("40.00");
++    }
++
++    @Test
++    void recordPaymentSentCreatesUnreadPaymentSentNotification() {
++        UUID userId = UUID.randomUUID();
++
++        notificationService.recordPaymentSent(userId, new BigDecimal("30.00"));
++
++        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
++        verify(notificationRepository).save(captor.capture());
++
++        assertThat(captor.getValue().notificationType()).isEqualTo(NotificationType.PAYMENT_SENT);
++    }
++
++    @Test
++    void recordPaymentReceivedCreatesUnreadPaymentReceivedNotification() {
++        UUID userId = UUID.randomUUID();
++
++        notificationService.recordPaymentReceived(userId, new BigDecimal("30.00"));
++
++        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
++        verify(notificationRepository).save(captor.capture());
++
++        assertThat(captor.getValue().notificationType()).isEqualTo(NotificationType.PAYMENT_RECEIVED);
++    }
++
++    @Test
++    void getNotificationHistoryReturnsRepositoryResult() {
++        UUID userId = UUID.randomUUID();
++        Notification notification = notification(userId, NotificationType.DEPOSIT, NotificationStatus.UNREAD);
++        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(notification));
++
++        List<NotificationResponse> response = notificationService.getNotificationHistory(userId);
++
++        assertThat(response).hasSize(1);
++        assertThat(response.getFirst().id()).isEqualTo(notification.id());
++        assertThat(response.getFirst().status()).isEqualTo(NotificationStatus.UNREAD);
++    }
++
++    @Test
++    void getNotificationRejectsNotificationOwnedByAnotherUser() {
++        UUID userId = UUID.randomUUID();
++        UUID notificationId = UUID.randomUUID();
++        when(notificationRepository.findByIdAndUserId(notificationId, userId)).thenReturn(Optional.empty());
++
++        assertThatThrownBy(() -> notificationService.getNotification(userId, notificationId))
++                .isInstanceOf(ResourceNotFoundException.class);
++    }
++
++    @Test
++    void markAsReadChangesUnreadNotificationToRead() {
++        UUID userId = UUID.randomUUID();
++        Notification notification = notification(userId, NotificationType.DEPOSIT, NotificationStatus.UNREAD);
++        when(notificationRepository.findByIdAndUserId(notification.id(), userId)).thenReturn(Optional.of(notification));
++
++        NotificationResponse response = notificationService.markAsRead(userId, notification.id());
++
++        assertThat(response.status()).isEqualTo(NotificationStatus.READ);
++        assertThat(response.readAt()).isNotNull();
++    }
++
++    @Test
++    void markAsReadIsIdempotentForReadNotifications() {
++        UUID userId = UUID.randomUUID();
++        Notification notification = notification(userId, NotificationType.DEPOSIT, NotificationStatus.READ);
++        Instant readAt = Instant.now().minusSeconds(60);
++        ReflectionTestUtils.setField(notification, "readAt", readAt);
++        when(notificationRepository.findByIdAndUserId(notification.id(), userId)).thenReturn(Optional.of(notification));
++
++        NotificationResponse response = notificationService.markAsRead(userId, notification.id());
++
++        assertThat(response.status()).isEqualTo(NotificationStatus.READ);
++        assertThat(response.readAt()).isEqualTo(readAt);
++    }
++
++    private Notification notification(UUID userId, NotificationType notificationType, NotificationStatus status) {
++        Notification notification = new Notification(
++                userId,
++                notificationType,
++                status,
++                "Title",
++                "Message",
++                "NTF-" + UUID.randomUUID()
++        );
++        ReflectionTestUtils.setField(notification, "id", UUID.randomUUID());
++        ReflectionTestUtils.setField(notification, "createdAt", Instant.now());
++        return notification;
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java b/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java
+index 272828f..5470028 100644
+--- a/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java
++++ b/src/test/java/com/monika/payflow/payment/repository/PaymentRepositoryTest.java
+@@ -35,11 +35,12 @@ class PaymentRepositoryTest {
+     private PaymentRepository paymentRepository;
+ 
+     @Test
+-    void findUserPaymentsOrderByCreatedAtDescReturnsSenderAndReceiverPaymentsOnly() {
++    void findUserPaymentsOrderByCreatedAtDescReturnsSenderAndReceiverPaymentsOnly() throws InterruptedException {
+         Wallet firstWallet = wallet("first@example.com");
+         Wallet secondWallet = wallet("second@example.com");
+         Wallet thirdWallet = wallet("third@example.com");
+         Payment sentPayment = paymentRepository.save(payment(firstWallet, secondWallet));
++        Thread.sleep(5);
+         Payment receivedPayment = paymentRepository.save(payment(thirdWallet, firstWallet));
+         paymentRepository.save(payment(secondWallet, thirdWallet));
+ 
+diff --git a/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+index ea87e11..5287eb8 100644
+--- a/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
++++ b/src/test/java/com/monika/payflow/payment/service/PaymentServiceTest.java
+@@ -2,6 +2,7 @@ package com.monika.payflow.payment.service;
+ 
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.payment.dto.PaymentResponse;
+ import com.monika.payflow.payment.dto.PaymentTransferRequest;
+ import com.monika.payflow.payment.entity.Payment;
+@@ -48,6 +49,9 @@ class PaymentServiceTest {
+     @Mock
+     private TransactionRecorder transactionRecorder;
+ 
++    @Mock
++    private NotificationRecorder notificationRecorder;
++
+     @InjectMocks
+     private PaymentService paymentService;
+ 
+@@ -99,6 +103,8 @@ class PaymentServiceTest {
+                 new BigDecimal("20.00"),
+                 new BigDecimal("50.00")
+         );
++        verify(notificationRecorder).recordPaymentSent(senderUserId, new BigDecimal("30.00"));
++        verify(notificationRecorder).recordPaymentReceived(receiverUserId, new BigDecimal("30.00"));
+         assertThat(response.status()).isEqualTo(PaymentStatus.SUCCESS);
+     }
+ 
+@@ -110,7 +116,7 @@ class PaymentServiceTest {
+         assertThatThrownBy(() -> paymentService.transfer(userId, request))
+                 .isInstanceOf(BadRequestException.class);
+ 
+-        verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder);
++        verifyNoInteractions(walletTransferService, paymentRepository, transactionRecorder, notificationRecorder);
+     }
+ 
+     @Test
+diff --git a/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java b/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java
+index 06e7195..29654c4 100644
+--- a/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java
++++ b/src/test/java/com/monika/payflow/transaction/repository/TransactionRepositoryTest.java
+@@ -36,10 +36,11 @@ class TransactionRepositoryTest {
+     private TransactionRepository transactionRepository;
+ 
+     @Test
+-    void findByWalletUserIdOrderByCreatedAtDescReturnsOnlyUserTransactions() {
++    void findByWalletUserIdOrderByCreatedAtDescReturnsOnlyUserTransactions() throws InterruptedException {
+         Wallet firstWallet = wallet("first-owner@example.com");
+         Wallet secondWallet = wallet("second-owner@example.com");
+         Transaction olderTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
++        Thread.sleep(5);
+         Transaction newerTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
+         transactionRepository.save(transaction(secondWallet, "TXN-" + UUID.randomUUID()));
+ 
+diff --git a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+index 599f946..39e9e9e 100644
+--- a/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
++++ b/src/test/java/com/monika/payflow/wallet/service/WalletServiceTest.java
+@@ -3,6 +3,7 @@ package com.monika.payflow.wallet.service;
+ import com.monika.payflow.common.exception.BadRequestException;
+ import com.monika.payflow.common.exception.ConflictException;
+ import com.monika.payflow.common.exception.ResourceNotFoundException;
++import com.monika.payflow.notification.service.NotificationRecorder;
+ import com.monika.payflow.transaction.service.TransactionRecorder;
+ import com.monika.payflow.user.entity.User;
+ import com.monika.payflow.user.entity.UserRole;
+@@ -40,6 +41,9 @@ class WalletServiceTest {
+     @Mock
+     private TransactionRecorder transactionRecorder;
+ 
++    @Mock
++    private NotificationRecorder notificationRecorder;
++
+     @InjectMocks
+     private WalletService walletService;
+ 
+@@ -106,6 +110,7 @@ class WalletServiceTest {
+                 new BigDecimal("100.00"),
+                 new BigDecimal("125.25")
+         );
++        verify(notificationRecorder).recordDeposit(userId, new BigDecimal("25.25"));
+     }
+ 
+     @Test
+@@ -124,6 +129,7 @@ class WalletServiceTest {
+                 new BigDecimal("100.00"),
+                 new BigDecimal("60.00")
+         );
++        verify(notificationRecorder).recordWithdrawal(userId, new BigDecimal("40.00"));
+     }
+ 
+     @Test
+@@ -137,6 +143,7 @@ class WalletServiceTest {
+ 
+         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+         verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
+     }
+ 
+     @Test
+@@ -150,6 +157,7 @@ class WalletServiceTest {
+ 
+         assertThat(wallet.balance()).isEqualByComparingTo("20.00");
+         verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
+     }
+ 
+     @Test
+@@ -174,6 +182,7 @@ class WalletServiceTest {
+         assertThat(result.receiver().balanceBefore()).isEqualByComparingTo("20.00");
+         assertThat(result.receiver().balanceAfter()).isEqualByComparingTo("50.00");
+         verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
+     }
+ 
+     @Test
+@@ -194,6 +203,7 @@ class WalletServiceTest {
+         assertThat(senderWallet.balance()).isEqualByComparingTo("10.00");
+         assertThat(receiverWallet.balance()).isEqualByComparingTo("20.00");
+         verifyNoInteractions(transactionRecorder);
++        verifyNoInteractions(notificationRecorder);
+     }
+ 
+     @Test

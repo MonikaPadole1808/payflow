@@ -232,6 +232,7 @@ idx_wallet_user
 | wallets | wallet |
 | payments | payment |
 | transactions | transaction |
+| notifications | notification |
 | refresh_tokens | auth |
 
 Cross-module ownership is prohibited.
@@ -622,6 +623,61 @@ Rules
 - A user cannot transfer money to themselves.
 - Every successful payment creates exactly one payment record.
 - Every successful payment creates exactly two transaction ledger records.
+
+---
+
+## notifications
+
+Owner Module
+
+notification
+
+Purpose
+
+Stores notification history for successful business events.
+
+Relationship
+
+One user has many notifications.
+
+Columns
+
+| Column | Type | Rule |
+|--------|------|------|
+| id | UUID | Primary key |
+| user_id | UUID | Required, references users(id) |
+| notification_type | VARCHAR(30) | Required, REGISTRATION, DEPOSIT, WITHDRAW, PAYMENT_SENT, or PAYMENT_RECEIVED |
+| status | VARCHAR(30) | Required, UNREAD or READ |
+| title | VARCHAR(120) | Required, cannot be blank |
+| message | VARCHAR(500) | Required, cannot be blank |
+| reference_number | VARCHAR(64) | Required, cannot be blank |
+| created_at | TIMESTAMPTZ | Required |
+| read_at | TIMESTAMPTZ | Required when status is READ, null when status is UNREAD |
+
+Constraints
+
+- `fk_notifications_user`
+- `ck_notifications_type`
+- `ck_notifications_status`
+- `ck_notifications_read_state`
+- `ck_notifications_title_not_blank`
+- `ck_notifications_message_not_blank`
+- `ck_notifications_reference_number_not_blank`
+
+Indexes
+
+- `idx_notifications_user_created_at`
+
+Migration
+
+- `V7__create_notifications_table.sql`
+
+Rules
+
+- Notifications are created internally only after successful business operations.
+- Users can access only their own notifications.
+- Notifications are never deleted.
+- Mark-as-read is idempotent.
 
 ---
 

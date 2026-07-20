@@ -214,3 +214,230 @@ Verification
 
 - All tests passed
 - Application startup verified
+
+# Project Progress
+
+> **Last Updated:** 20-Jul-2026
+
+---
+
+# Current Phase
+
+Phase 1
+
+---
+
+# Current Version
+
+V1
+
+---
+
+# Current Sprint
+
+Sprint 1
+
+---
+
+# Completed
+
+- [x] Project initialized
+- [x] Common infrastructure completed
+- [x] Authentication Foundation
+- [x] Wallet Module
+- [x] Transaction Ledger
+- [x] Payment Processing
+
+---
+
+# In Progress
+
+Notification Module implementation
+
+---
+
+# Next Task
+
+Implement Notification Module.
+
+Objectives
+
+- Notification persistence
+- Notification history
+- Notification details
+- Mark notification as read
+- Internal notification generation
+- Flyway Migration V7
+
+---
+
+# Blockers
+
+None
+
+---
+
+# Technical Debt
+
+None
+
+---
+
+# Current Branch
+
+dev
+
+---
+
+# Current Database
+
+Tables
+
+- users
+- refresh_tokens
+- wallets
+- transactions
+- payments
+
+---
+
+# Current API Modules
+
+Authentication
+
+✔ Completed
+
+Wallet
+
+✔ Completed
+
+Transaction
+
+✔ Completed
+
+Payment
+
+✔ Completed
+
+Notification
+
+In Progress
+
+Admin
+
+Pending
+
+---
+
+# Milestone Status
+
+## Milestone 01
+
+✔ Project Foundation
+
+---
+
+## Milestone 02
+
+✔ Authentication Foundation
+
+Implemented
+
+- Spring Security
+- JWT Authentication
+- Refresh Tokens
+- User Registration
+- Login
+- Authentication Tests
+
+---
+
+## Milestone 03
+
+✔ Wallet Module
+
+Implemented
+
+- Wallet Management
+- Deposit
+- Withdraw
+- Wallet Balance
+- Automatic Wallet Provisioning
+
+---
+
+## Milestone 04
+
+✔ Transaction Ledger
+
+Implemented
+
+- Immutable Ledger
+- Transaction History
+- Transaction Details
+- Balance Snapshots
+- Internal Transaction Recording
+
+---
+
+## Milestone 05
+
+✔ Payment Processing
+
+Implemented
+
+- Wallet-to-Wallet Transfer
+- Atomic Payment Processing
+- Payment History
+- Payment Details
+- Internal Wallet Transfer Service
+- TRANSFER_OUT Ledger
+- TRANSFER_IN Ledger
+
+---
+
+## Milestone 06
+
+In Progress
+
+Notification Module
+
+Objectives
+
+- Notification persistence
+- Notification history
+- Notification details
+- Mark as read
+- Internal event notifications
+
+---
+
+# Current Architecture
+
+Modules
+
+- auth
+- user
+- wallet
+- transaction
+- payment
+- notification
+- common
+
+Architecture Status
+
+Stable
+
+No architecture changes pending.
+
+---
+
+# Next Planned Milestones
+
+- Notification Module
+- Admin Module
+- Monitoring & Observability
+- Docker & Deployment
+- Production Hardening
+- Kafka Integration
+- Microservice Extraction

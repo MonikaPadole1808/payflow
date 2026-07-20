@@ -11,6 +11,7 @@ import com.monika.payflow.auth.security.JwtService;
 import com.monika.payflow.common.exception.AuthenticationFailedException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.InvalidRefreshTokenException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.user.entity.UserRole;
 import com.monika.payflow.user.entity.UserStatus;
@@ -58,6 +59,9 @@ class AuthServiceTest {
     @Mock
     private WalletProvisioningService walletProvisioningService;
 
+    @Mock
+    private NotificationRecorder notificationRecorder;
+
     @InjectMocks
     private AuthService authService;
 
@@ -78,6 +82,7 @@ class AuthServiceTest {
 
         verify(userAccountService).createActiveUser("monika@example.com", "encoded");
         verify(walletProvisioningService).createWalletForUser(savedUser);
+        verify(notificationRecorder).recordRegistration(savedUser.id());
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isNotBlank();
         assertThat(response.tokenType()).isEqualTo("Bearer");

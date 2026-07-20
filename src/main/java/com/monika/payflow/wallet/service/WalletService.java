@@ -4,6 +4,7 @@ import com.monika.payflow.common.error.ErrorCode;
 import com.monika.payflow.common.exception.BadRequestException;
 import com.monika.payflow.common.exception.ConflictException;
 import com.monika.payflow.common.exception.ResourceNotFoundException;
+import com.monika.payflow.notification.service.NotificationRecorder;
 import com.monika.payflow.transaction.service.TransactionRecorder;
 import com.monika.payflow.user.entity.User;
 import com.monika.payflow.wallet.dto.WalletResponse;
@@ -27,10 +28,16 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
 
     private final WalletRepository walletRepository;
     private final TransactionRecorder transactionRecorder;
+    private final NotificationRecorder notificationRecorder;
 
-    public WalletService(WalletRepository walletRepository, TransactionRecorder transactionRecorder) {
+    public WalletService(
+            WalletRepository walletRepository,
+            TransactionRecorder transactionRecorder,
+            NotificationRecorder notificationRecorder
+    ) {
         this.walletRepository = walletRepository;
         this.transactionRecorder = transactionRecorder;
+        this.notificationRecorder = notificationRecorder;
     }
 
     @Override
@@ -62,6 +69,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
 
         wallet.updateBalance(balanceAfter);
         transactionRecorder.recordDeposit(wallet, normalizedAmount, balanceBefore, balanceAfter);
+        notificationRecorder.recordDeposit(userId, normalizedAmount);
 
         return toResponse(wallet);
     }
@@ -82,6 +90,7 @@ public class WalletService implements WalletProvisioningService, WalletTransferS
         BigDecimal balanceAfter = balanceBefore.subtract(normalizedAmount);
         wallet.updateBalance(balanceAfter);
         transactionRecorder.recordWithdrawal(wallet, normalizedAmount, balanceBefore, balanceAfter);
+        notificationRecorder.recordWithdrawal(userId, normalizedAmount);
 
         return toResponse(wallet);
     }

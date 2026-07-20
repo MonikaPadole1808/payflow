@@ -627,7 +627,122 @@ Rules
 
 # 18. Notification APIs
 
-No public APIs in Version 1.
+All Notification APIs require authentication.
+
+Authorization
+
+USER
+
+ADMIN
+
+---
+
+## Notification History
+
+GET
+
+/api/v1/notifications
+
+Purpose
+
+Return the authenticated user's notifications.
+
+Response
+
+{
+"success": true,
+"message": "Notifications retrieved successfully",
+"data": [
+{
+"id": "uuid",
+"userId": "uuid",
+"notificationType": "DEPOSIT",
+"status": "UNREAD",
+"title": "Deposit successful",
+"message": "Your wallet deposit of 100.00 was completed successfully.",
+"referenceNumber": "NTF-uuid",
+"createdAt": "timestamp",
+"readAt": null
+}
+]
+}
+
+Rules
+
+- Notifications are returned newest first.
+- Users can view only their own notifications.
+- No public create notification API exists in Version 1.
+
+---
+
+## Notification Details
+
+GET
+
+/api/v1/notifications/{id}
+
+Purpose
+
+Return one notification owned by the authenticated user.
+
+Response
+
+{
+"success": true,
+"message": "Notification retrieved successfully",
+"data": {
+"id": "uuid",
+"userId": "uuid",
+"notificationType": "PAYMENT_RECEIVED",
+"status": "UNREAD",
+"title": "Payment received",
+"message": "You received a payment of 100.00.",
+"referenceNumber": "NTF-uuid",
+"createdAt": "timestamp",
+"readAt": null
+}
+}
+
+Rules
+
+- Users can view only their own notifications.
+
+---
+
+## Mark Notification As Read
+
+PATCH
+
+/api/v1/notifications/{id}/read
+
+Purpose
+
+Mark one notification owned by the authenticated user as READ.
+
+Response
+
+{
+"success": true,
+"message": "Notification marked as read successfully",
+"data": {
+"id": "uuid",
+"userId": "uuid",
+"notificationType": "DEPOSIT",
+"status": "READ",
+"title": "Deposit successful",
+"message": "Your wallet deposit of 100.00 was completed successfully.",
+"referenceNumber": "NTF-uuid",
+"createdAt": "timestamp",
+"readAt": "timestamp"
+}
+}
+
+Rules
+
+- Users can mark only their own notifications as read.
+- Mark-as-read is idempotent.
+- Version 1 supports REGISTRATION, DEPOSIT, WITHDRAW, PAYMENT_SENT, and PAYMENT_RECEIVED notification types.
+- Version 1 supports UNREAD and READ notification statuses.
 
 ---
 

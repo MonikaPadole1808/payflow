@@ -36,10 +36,11 @@ class TransactionRepositoryTest {
     private TransactionRepository transactionRepository;
 
     @Test
-    void findByWalletUserIdOrderByCreatedAtDescReturnsOnlyUserTransactions() {
+    void findByWalletUserIdOrderByCreatedAtDescReturnsOnlyUserTransactions() throws InterruptedException {
         Wallet firstWallet = wallet("first-owner@example.com");
         Wallet secondWallet = wallet("second-owner@example.com");
         Transaction olderTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
+        Thread.sleep(5);
         Transaction newerTransaction = transactionRepository.save(transaction(firstWallet, "TXN-" + UUID.randomUUID()));
         transactionRepository.save(transaction(secondWallet, "TXN-" + UUID.randomUUID()));
 

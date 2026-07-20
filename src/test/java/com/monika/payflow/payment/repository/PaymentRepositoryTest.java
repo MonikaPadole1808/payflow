@@ -35,11 +35,12 @@ class PaymentRepositoryTest {
     private PaymentRepository paymentRepository;
 
     @Test
-    void findUserPaymentsOrderByCreatedAtDescReturnsSenderAndReceiverPaymentsOnly() {
+    void findUserPaymentsOrderByCreatedAtDescReturnsSenderAndReceiverPaymentsOnly() throws InterruptedException {
         Wallet firstWallet = wallet("first@example.com");
         Wallet secondWallet = wallet("second@example.com");
         Wallet thirdWallet = wallet("third@example.com");
         Payment sentPayment = paymentRepository.save(payment(firstWallet, secondWallet));
+        Thread.sleep(5);
         Payment receivedPayment = paymentRepository.save(payment(thirdWallet, firstWallet));
         paymentRepository.save(payment(secondWallet, thirdWallet));
 

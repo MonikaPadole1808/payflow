@@ -18,6 +18,7 @@ public enum ErrorCode {
     TRANSACTION_NOT_FOUND("PF-404-003", "Transaction was not found", HttpStatus.NOT_FOUND),
     PAYMENT_NOT_FOUND("PF-404-004", "Payment was not found", HttpStatus.NOT_FOUND),
     PAYMENT_SELF_TRANSFER_NOT_ALLOWED("PF-400-005", "Users cannot transfer money to themselves", HttpStatus.BAD_REQUEST),
+    NOTIFICATION_NOT_FOUND("PF-404-005", "Notification was not found", HttpStatus.NOT_FOUND),
     INTERNAL_SERVER_ERROR("PF-500-001", "An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR);
 
     private final String code;
