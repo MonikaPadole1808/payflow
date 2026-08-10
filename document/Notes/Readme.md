@@ -9,3 +9,5 @@ Naming Convention
 002_Architecture.md
 
 003_Database_Design.md
+
+2026-08-10_Registration_PF500_Notes.md

@@ -1,0 +1,581 @@
+diff --git a/.review/registration-pf-500-001/REVIEW_SUMMARY.md b/.review/registration-pf-500-001/REVIEW_SUMMARY.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..6218a6338909fdf99eec4fbcbc7587ee5e953569
+--- /dev/null
++++ b/.review/registration-pf-500-001/REVIEW_SUMMARY.md
+@@ -0,0 +1,197 @@
++# Registration PF-500-001 Review Summary
++
++## Original Failing Request And Response
++
++Request:
++
++```http
++POST /api/v1/auth/register
++Content-Type: application/json
++```
++
++Postman body from `postman/PayFlow_Local.postman_environment.json`:
++
++```json
++{
++  "email": "payflow.user@example.com",
++  "password": "Password123"
++}
++```
++
++Reported response:
++
++```json
++{
++  "success": false,
++  "message": "An unexpected error occurred",
++  "errorCode": "PF-500-001",
++  "timestamp": "2026-08-10T01:24:52.042268Z"
++}
++```
++
++Controlled reproduction with invalid JWT secret:
++
++```text
++PAYFLOW_JWT_SECRET=secret
++POST http://127.0.0.1:18081/api/v1/auth/register
++HTTP_STATUS=500
++BODY={"success":false,"message":"An unexpected error occurred","errorCode":"PF-500-001","timestamp":"2026-08-10T02:17:36.114404300Z"}
++```
++
++## Exact Root Cause And Evidence
++
++The backend accepted an invalid JWT signing secret at startup and failed later when registration attempted to generate the access token.
++
++Confirmed deepest/root exception:
++
++```text
++io.jsonwebtoken.security.WeakKeyException
++```
++
++Supporting evidence:
++
++- With valid secret `MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=`, PostgreSQL-backed registration returned `201 Created`.
++- With duplicate email, PostgreSQL-backed registration returned `409 PF-409-001`.
++- With invalid secret `secret`, PostgreSQL-backed registration returned the same `500 PF-500-001` shape as the reported failure.
++- After the fix, controlled startup with `PAYFLOW_JWT_SECRET=secret` fails during configuration binding with a JJWT weak-key message before registration traffic can be accepted.
++
++## Registration Flow Point Where It Failed
++
++```text
++AuthController.register(...)
++  -> AuthService.register(...)
++     -> UserAccountService.createActiveUser(...)
++     -> WalletProvisioningService.createWalletForUser(...)
++     -> NotificationRecorder.recordRegistration(...)
++     -> AuthService.createAuthResponse(...)
++     -> JwtService.generateAccessToken(...)
++     -> JwtService.signingKey(...)
++     -> Keys.hmacShaKeyFor(...)
++```
++
++Failing class and method:
++
++```text
++com.monika.payflow.auth.security.JwtService.signingKey()
++```
++
++Why it became `PF-500-001`:
++
++`WeakKeyException` was not a PayFlow business exception, so `GlobalExceptionHandler.handleUnexpectedException(...)` logged it and returned `ErrorCode.INTERNAL_SERVER_ERROR`.
++
++## Files Changed And Why
++
++- `src/main/java/com/monika/payflow/auth/security/JwtProperties.java`: validates JWT secret during configuration binding and fails startup for blank, invalid Base64, or weak HMAC keys.
++- `src/test/java/com/monika/payflow/auth/security/JwtServiceTest.java`: adds regression coverage for weak-secret fail-fast behavior.
++- `src/test/java/com/monika/payflow/auth/controller/AuthRegistrationIntegrationTest.java`: adds endpoint-level registration coverage for successful response and user/wallet/notification/refresh-token side effects.
++- `README.md`: documents local JWT secret requirements.
++- `document/Notes/2026-08-10_Registration_PF500_Notes.md`: records root cause, flow point, correction, and verification.
++- `document/Q&A/2026-08-10_Registration_PF500_QA.md`: adds interview-style explanation of the failure and fix.
++- `document/Notes/Readme.md`, `document/Q&A/Readme.md`, `document/Project_Progress.md`: link and summarize the regression update.
++
++## Description Of The Correction
++
++`JwtProperties` now validates `payflow.security.jwt.secret` as soon as Spring binds configuration. A misconfigured instance fails startup instead of accepting registration requests and failing during JWT generation. The V1 API contract remains unchanged for valid configuration.
++
++## Regression Tests Added
++
++- `JwtServiceTest.weakSecretFailsFastDuringConfigurationBinding`
++- `AuthRegistrationIntegrationTest.registerCompletesAllRegistrationSideEffectsAtomically`
++
++## Commands Run With Exact Results
++
++```text
++git status --short
++Result: clean at start
++```
++
++```text
++.\gradlew.bat test --tests com.monika.payflow.auth.controller.AuthRegistrationIntegrationTest
++Result: BUILD SUCCESSFUL in 19s
++```
++
++```text
++.\gradlew.bat test --tests com.monika.payflow.auth.security.JwtServiceTest.invalidSecretFailsTokenGeneration
++Result before fix: BUILD SUCCESSFUL in 4s, confirming WeakKeyException
++```
++
++```text
++.\gradlew.bat test --tests com.monika.payflow.auth.security.JwtServiceTest --tests com.monika.payflow.auth.controller.AuthRegistrationIntegrationTest
++Result: BUILD SUCCESSFUL in 46s
++```
++
++```text
++.\gradlew.bat bootRun --args='--server.port=18082'
++PAYFLOW_JWT_SECRET=secret
++Result after fix: APPLICATION FAILED TO START; failed to bind payflow.security.jwt due WeakKeyException
++```
++
++```text
++.\gradlew.bat test
++Result: BUILD SUCCESSFUL in 34s
++```
++
++Repository Gradle tasks do not define separate formatting or static-analysis checks beyond the standard `test` task.
++
++## Manual Postman-Compatible Result
++
++Controlled PostgreSQL-backed app on port `18083` with valid secret:
++
++```text
++POST /api/v1/auth/register
++email=codex.manual.registration.20260810@example.com
++HTTP=201
++message=User registered successfully
++tokenType=Bearer
++```
++
++Login verification:
++
++```text
++POST /api/v1/auth/login
++HTTP=200
++response contained accessToken
++```
++
++Duplicate verification:
++
++```text
++POST /api/v1/auth/register
++same email
++HTTP=409
++BODY={"success":false,"message":"Email already exists","errorCode":"PF-409-001","timestamp":"2026-08-10T02:23:55.603141600Z"}
++```
++
++## Database Verification Result
++
++For `codex.manual.registration.20260810@example.com` after register plus login:
++
++```text
++users_count=1
++wallets_count=1
++registration_notifications_count=1
++refresh_tokens_count=2
++```
++
++`refresh_tokens_count=2` is expected because registration created one refresh token and login created another.
++
++For failed invalid-secret registration email `codex.invalid.secret.20260810@example.com`:
++
++```text
++failed_users_count=0
++failed_wallets_count=0
++failed_notifications_count=0
++failed_refresh_tokens_count=0
++```
++
++No partial data remained after the reproduced failure.
++
++## Remaining Risks Or Blockers
++
++- PostgreSQL read-only verification used the cached PostgreSQL JDBC driver because `psql` was not installed.
++- The Java compiler emitted a Windows access warning when closing a Gradle-cached driver jar during one read-only DB check, but the SQL query completed and returned the counts above.
++- Existing refresh-token behavior creates a new refresh token on each login; this was not changed.
++
++## Git Confirmation
++
++Nothing was staged, committed, pushed, merged, reset, or branched.
+diff --git a/README.md b/README.md
+index 139a8a332ac2580d2105e427c2085c3937aa7b5f..7299e90b6cc2b571a7ff5d0c3bdfcd9cff2b4ede 100644
+--- a/README.md
++++ b/README.md
+@@ -45,6 +45,20 @@ The project starts as a **Modular Monolith** and will later evolve into a **Micr
+ 
+ ---
+ 
++## Local Security Configuration
++
++PayFlow requires a Base64-encoded JWT HMAC secret with at least 32 decoded bytes.
++
++Example for local development only:
++
++```text
++PAYFLOW_JWT_SECRET=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
++```
++
++The application fails startup when the JWT secret is missing, not valid Base64, or too weak for HMAC signing.
++
++---
++
+ ## Planned Features
+ 
+ ### Authentication
+@@ -256,4 +270,4 @@ Project Initialization
+ 
+ ## License
+ 
+-This project is intended for educational purposes and portfolio demonstration.
+\ No newline at end of file
++This project is intended for educational purposes and portfolio demonstration.
+diff --git a/document/Notes/2026-08-10_Registration_PF500_Notes.md b/document/Notes/2026-08-10_Registration_PF500_Notes.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..41cf294044cd487a8703caa197526c149cfaa38e
+--- /dev/null
++++ b/document/Notes/2026-08-10_Registration_PF500_Notes.md
+@@ -0,0 +1,69 @@
++# Registration PF-500-001 Diagnosis
++
++Date: 10-Aug-2026
++
++Endpoint:
++
++```http
++POST /api/v1/auth/register
++```
++
++## Confirmed Root Cause
++
++Registration returned `PF-500-001` when the application was started with an invalid JWT signing secret, such as:
++
++```text
++PAYFLOW_JWT_SECRET=secret
++```
++
++The registration transaction reached access-token creation after creating the user, wallet, and registration notification in the current persistence context. `JwtService.generateAccessToken(...)` then attempted to build an HMAC signing key from `JwtProperties.secret()`.
++
++JJWT rejected the decoded key as too weak:
++
++```text
++io.jsonwebtoken.security.WeakKeyException
++```
++
++Because this was an unhandled runtime exception, `GlobalExceptionHandler.handleUnexpectedException(...)` converted it to the generic internal error response:
++
++```json
++{
++  "success": false,
++  "message": "An unexpected error occurred",
++  "errorCode": "PF-500-001"
++}
++```
++
++## Registration Flow Point
++
++Failure point:
++
++```text
++AuthController.register(...)
++  -> AuthService.register(...)
++     -> UserAccountService.createActiveUser(...)
++     -> WalletProvisioningService.createWalletForUser(...)
++     -> NotificationRecorder.recordRegistration(...)
++     -> AuthService.createAuthResponse(...)
++     -> JwtService.generateAccessToken(...)
++     -> JwtService.signingKey(...)
++```
++
++## Correction
++
++`JwtProperties` now validates `payflow.security.jwt.secret` during configuration binding.
++
++The application fails startup if the secret is blank, not valid Base64, or decodes to an HMAC key shorter than 256 bits. This prevents a misconfigured server from accepting registration traffic and failing mid-request.
++
++The API contract remains unchanged. Valid registration still returns `201 Created`; duplicate email still returns `409 PF-409-001`; unexpected runtime failures still use the generic internal error response without exposing internals.
++
++## Atomicity
++
++`AuthService.register(...)` remains `@Transactional`. When token creation failed before the fix, the runtime exception marked the registration transaction for rollback, so no partial user, wallet, notification, or refresh-token records should remain from that failed request.
++
++## Verification Notes
++
++- Reproduced `500 PF-500-001` by running the backend with `PAYFLOW_JWT_SECRET=secret` and calling registration.
++- Confirmed valid secret registration succeeds against PostgreSQL on a controlled local port.
++- Confirmed duplicate registration returns `409 PF-409-001`.
++- Confirmed bad secret now fails during startup configuration binding instead of during registration.
+diff --git a/document/Notes/Readme.md b/document/Notes/Readme.md
+index ca4ac18e7af2e76d24023bdfc0c83d49f09ec7bc..775ca1113d0a4e2c374dd7eb930d16a364526106 100644
+--- a/document/Notes/Readme.md
++++ b/document/Notes/Readme.md
+@@ -8,4 +8,6 @@ Naming Convention
+ 
+ 002_Architecture.md
+ 
+-003_Database_Design.md
+\ No newline at end of file
++003_Database_Design.md
++
++2026-08-10_Registration_PF500_Notes.md
+diff --git a/document/Project_Progress.md b/document/Project_Progress.md
+index aa6702919b04304dcfe465fa1f4ba3fd1fc8bb1b..8c95d5fc9b29d74dcbec42e84fd37619f73fd891 100644
+--- a/document/Project_Progress.md
++++ b/document/Project_Progress.md
+@@ -6,7 +6,7 @@
+ >
+ > **Status:** Completed
+ >
+-> **Last Updated:** 20-Jul-2026
++> **Last Updated:** 10-Aug-2026
+ 
+ ---
+ 
+@@ -211,6 +211,13 @@ Completed
+ 
+ Application startup verified successfully.
+ 
++Regression Update - 10-Aug-2026
++
++- Diagnosed registration `PF-500-001` caused by an invalid JWT signing secret.
++- Added JWT secret fail-fast validation during configuration binding.
++- Added registration integration coverage for user, wallet, registration notification, and refresh-token side effects.
++- Verified duplicate registration still maps to `409 PF-409-001`.
++
+ ---
+ 
+ # Version 1 Scope
+@@ -255,4 +262,4 @@ Planned
+ 
+ Version 1
+ 
+-████████████████████ 100%
+\ No newline at end of file
++████████████████████ 100%
+diff --git a/document/Q&A/2026-08-10_Registration_PF500_QA.md b/document/Q&A/2026-08-10_Registration_PF500_QA.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..6512c911fe7afb9d93a73b29ff62d7ce18530c3b
+--- /dev/null
++++ b/document/Q&A/2026-08-10_Registration_PF500_QA.md
+@@ -0,0 +1,55 @@
++# Registration PF-500-001 Q&A
++
++## What caused registration to return PF-500-001?
++
++The backend was running with an invalid JWT secret. The value `secret` is not a secure 256-bit HMAC key after Base64 decoding. Registration failed when `JwtService` tried to create the access token.
++
++## Why did this happen after user, wallet, and notification work began?
++
++`AuthService.register(...)` creates the user, provisions the wallet, records the registration notification, and then creates the authentication response. Access-token creation happens in `createAuthResponse(...)`, near the end of the registration flow.
++
++## What was the exact exception?
++
++The deepest confirmed exception was:
++
++```text
++io.jsonwebtoken.security.WeakKeyException
++```
++
++## Why did the client receive PF-500-001?
++
++No PayFlow business exception handled this configuration failure. It reached `GlobalExceptionHandler.handleUnexpectedException(...)`, which correctly returned the generic internal server error response without exposing stack trace or JWT details.
++
++## Did duplicate email cause this failure?
++
++No. Duplicate email was verified separately and returns:
++
++```http
++409 Conflict
++```
++
++with error code:
++
++```text
++PF-409-001
++```
++
++## What changed?
++
++`JwtProperties` now validates `payflow.security.jwt.secret` during Spring configuration binding. If the secret is blank, not Base64, or too weak for HMAC signing, application startup fails.
++
++## Why is fail-fast better than mapping this to a client error?
++
++An invalid JWT secret is server misconfiguration, not a bad registration request. The correct production behavior is to reject startup so the service does not accept traffic in a broken security state.
++
++## Does registration remain atomic?
++
++Yes. Registration still runs inside `AuthService.register(...)` with `@Transactional`. Runtime failures roll back the transaction, so user, wallet, notification, and refresh-token data are not partially committed.
++
++## What should developers use for local startup?
++
++Use a Base64-encoded key with at least 32 bytes of decoded entropy. Example for local development only:
++
++```text
++PAYFLOW_JWT_SECRET=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
++```
+diff --git a/document/Q&A/Readme.md b/document/Q&A/Readme.md
+index 799614154f0bfa3e2096f717f413ef287194595b..d336e4df1dd96d4b72b8d06c8e06bf963089ece9 100644
+--- a/document/Q&A/Readme.md
++++ b/document/Q&A/Readme.md
+@@ -8,4 +8,6 @@ Naming Convention
+ 
+ 002_Architecture_QA.md
+ 
+-003_Database_Design_QA.md
+\ No newline at end of file
++003_Database_Design_QA.md
++
++2026-08-10_Registration_PF500_QA.md
+diff --git a/src/main/java/com/monika/payflow/auth/security/JwtProperties.java b/src/main/java/com/monika/payflow/auth/security/JwtProperties.java
+index e393e9ec8d5670c14d980d373fce36807e3a4dfc..09fc656fb393b7bfe98688d21d146174d972a82c 100644
+--- a/src/main/java/com/monika/payflow/auth/security/JwtProperties.java
++++ b/src/main/java/com/monika/payflow/auth/security/JwtProperties.java
+@@ -1,6 +1,11 @@
+ package com.monika.payflow.auth.security;
+ 
++import io.jsonwebtoken.io.Decoders;
++import io.jsonwebtoken.io.DecodingException;
++import io.jsonwebtoken.security.Keys;
++import io.jsonwebtoken.security.WeakKeyException;
+ import org.springframework.boot.context.properties.ConfigurationProperties;
++import org.springframework.util.StringUtils;
+ 
+ @ConfigurationProperties(prefix = "payflow.security.jwt")
+ public record JwtProperties(
+@@ -8,4 +13,19 @@ public record JwtProperties(
+         long accessTokenExpirationMinutes,
+         long refreshTokenExpirationDays
+ ) {
++
++    public JwtProperties {
++        if (!StringUtils.hasText(secret)) {
++            throw new IllegalStateException("payflow.security.jwt.secret must be configured");
++        }
++
++        try {
++            Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret));
++        } catch (DecodingException | WeakKeyException exception) {
++            throw new IllegalStateException(
++                    "payflow.security.jwt.secret must be a Base64-encoded HMAC key of at least 256 bits",
++                    exception
++            );
++        }
++    }
+ }
+diff --git a/src/test/java/com/monika/payflow/auth/controller/AuthRegistrationIntegrationTest.java b/src/test/java/com/monika/payflow/auth/controller/AuthRegistrationIntegrationTest.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..41cd84d6a9f8bc16e53a8b9d790f5c448eb86832
+--- /dev/null
++++ b/src/test/java/com/monika/payflow/auth/controller/AuthRegistrationIntegrationTest.java
+@@ -0,0 +1,76 @@
++package com.monika.payflow.auth.controller;
++
++import com.monika.payflow.auth.repository.RefreshTokenRepository;
++import com.monika.payflow.notification.entity.NotificationType;
++import com.monika.payflow.notification.repository.NotificationRepository;
++import com.monika.payflow.user.repository.UserRepository;
++import com.monika.payflow.wallet.repository.WalletRepository;
++import org.junit.jupiter.api.Test;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.http.MediaType;
++import org.springframework.test.web.servlet.MockMvc;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.hamcrest.Matchers.not;
++import static org.hamcrest.Matchers.blankOrNullString;
++import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
++import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
++
++@SpringBootTest(properties = {
++        "payflow.security.jwt.secret=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",
++        "spring.datasource.url=jdbc:h2:mem:registration_test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
++        "spring.datasource.driver-class-name=org.h2.Driver",
++        "spring.datasource.username=sa",
++        "spring.datasource.password=",
++        "spring.jpa.hibernate.ddl-auto=create-drop",
++        "spring.flyway.enabled=false"
++})
++@AutoConfigureMockMvc
++class AuthRegistrationIntegrationTest {
++
++    @Autowired
++    private MockMvc mockMvc;
++
++    @Autowired
++    private UserRepository userRepository;
++
++    @Autowired
++    private WalletRepository walletRepository;
++
++    @Autowired
++    private NotificationRepository notificationRepository;
++
++    @Autowired
++    private RefreshTokenRepository refreshTokenRepository;
++
++    @Test
++    void registerCompletesAllRegistrationSideEffectsAtomically() throws Exception {
++        String email = "registration.integration@example.com";
++
++        mockMvc.perform(post("/api/v1/auth/register")
++                        .contentType(MediaType.APPLICATION_JSON)
++                        .content("""
++                                {
++                                  "email": "registration.integration@example.com",
++                                  "password": "password123"
++                                }
++                                """))
++                .andExpect(status().isCreated())
++                .andExpect(jsonPath("$.success").value(true))
++                .andExpect(jsonPath("$.data.accessToken", not(blankOrNullString())))
++                .andExpect(jsonPath("$.data.refreshToken", not(blankOrNullString())))
++                .andExpect(jsonPath("$.data.tokenType").value("Bearer"));
++
++        var user = userRepository.findByEmail(email).orElseThrow();
++
++        assertThat(walletRepository.findByUserId(user.id())).isPresent();
++        assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(user.id()))
++                .singleElement()
++                .satisfies(notification ->
++                        assertThat(notification.notificationType()).isEqualTo(NotificationType.REGISTRATION));
++        assertThat(refreshTokenRepository.count()).isEqualTo(1);
++    }
++}
+diff --git a/src/test/java/com/monika/payflow/auth/security/JwtServiceTest.java b/src/test/java/com/monika/payflow/auth/security/JwtServiceTest.java
+index 6bc8437ef2faa66f7f2b15951c971544d5c2eae4..e9e1bf7e8db594b465000586d3ee7fd290f12f5b 100644
+--- a/src/test/java/com/monika/payflow/auth/security/JwtServiceTest.java
++++ b/src/test/java/com/monika/payflow/auth/security/JwtServiceTest.java
+@@ -1,5 +1,6 @@
+ package com.monika.payflow.auth.security;
+ 
++import io.jsonwebtoken.security.WeakKeyException;
+ import org.junit.jupiter.api.Test;
+ import org.springframework.security.core.userdetails.User;
+ import org.springframework.security.core.userdetails.UserDetails;
+@@ -7,6 +8,7 @@ import org.springframework.security.core.userdetails.UserDetails;
+ import java.util.Base64;
+ 
+ import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
+ 
+ class JwtServiceTest {
+ 
+@@ -40,4 +42,12 @@ class JwtServiceTest {
+ 
+         assertThat(jwtService.isTokenValid(token, userDetails)).isFalse();
+     }
++
++    @Test
++    void weakSecretFailsFastDuringConfigurationBinding() {
++        assertThatThrownBy(() -> new JwtProperties("secret", 15, 7))
++                .isInstanceOf(IllegalStateException.class)
++                .hasCauseInstanceOf(WeakKeyException.class)
++                .hasMessage("payflow.security.jwt.secret must be a Base64-encoded HMAC key of at least 256 bits");
++    }
+ }

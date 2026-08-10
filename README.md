@@ -45,6 +45,20 @@ The project starts as a **Modular Monolith** and will later evolve into a **Micr
 
 ---
 
+## Local Security Configuration
+
+PayFlow requires a Base64-encoded JWT HMAC secret with at least 32 decoded bytes.
+
+Example for local development only:
+
+```text
+PAYFLOW_JWT_SECRET=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+```
+
+The application fails startup when the JWT secret is missing, not valid Base64, or too weak for HMAC signing.
+
+---
+
 ## Planned Features
 
 ### Authentication

@@ -6,7 +6,7 @@
 >
 > **Status:** Completed
 >
-> **Last Updated:** 20-Jul-2026
+> **Last Updated:** 10-Aug-2026
 
 ---
 
@@ -210,6 +210,13 @@ Completed
 - Authorization Tests
 
 Application startup verified successfully.
+
+Regression Update - 10-Aug-2026
+
+- Diagnosed registration `PF-500-001` caused by an invalid JWT signing secret.
+- Added JWT secret fail-fast validation during configuration binding.
+- Added registration integration coverage for user, wallet, registration notification, and refresh-token side effects.
+- Verified duplicate registration still maps to `409 PF-409-001`.
 
 ---
 
